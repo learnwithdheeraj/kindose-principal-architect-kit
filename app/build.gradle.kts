@@ -81,4 +81,10 @@ dependencies {
   implementation(libs.androidx.navigation3.ui)
   implementation(libs.androidx.navigation3.runtime)
   implementation(libs.androidx.lifecycle.viewmodel.navigation3)
+
+  // Jetpack CredentialManager (Google One-Tap + FIDO2 Passkeys) & Firebase Cloud Messaging (FCM)
+  implementation(libs.androidx.credentials)
+  implementation(libs.androidx.credentials.play.services.auth)
+  implementation(libs.google.identity.googleid)
+  implementation(libs.firebase.messaging)
 }

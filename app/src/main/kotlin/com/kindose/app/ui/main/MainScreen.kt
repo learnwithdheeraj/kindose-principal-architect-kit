@@ -1761,6 +1761,43 @@ private fun AccountSignInModalSheetContent(
             }
         }
 
+        // 6. Firebase Cloud Messaging (FCM) High-Priority Escalation Status
+        Surface(
+            color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.65f),
+            shape = RoundedCornerShape(20.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier.padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Firebase Cloud Messaging (FCM)",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text(
+                        text = "${vault.fcmPushDeliveredCount} Pushes · ${vault.fcmTokenPreview.take(12)}...",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = GoogleSansMonoFamily,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
+                }
+                Text(
+                    text = vault.lastFcmPushSummary,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.85f)
+                )
+            }
+        }
+
         // Device Migration & Audit Actions
         Row(
             modifier = Modifier.fillMaxWidth(),

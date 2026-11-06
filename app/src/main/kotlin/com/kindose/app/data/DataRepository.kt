@@ -1,6 +1,9 @@
 package com.kindose.app.data
 
 import com.kindose.app.domain.*
+import com.kindose.app.fcm.FcmPayloadParser
+import com.kindose.app.fcm.FcmParseOutcome
+import com.kindose.app.fcm.FcmRuntimeRegistry
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -41,9 +44,15 @@ interface DataRepository {
     fun simulateFastForwardToEscalation(doseWindowId: DoseWindowId)
     fun resetWindowToDue(doseWindowId: DoseWindowId)
     fun switchIdentityProvider(provider: IdentityProvider)
-    fun signInWithAccount(provider: IdentityProvider, email: String, displayName: String)
+    fun signInWithAccount(
+        provider: IdentityProvider,
+        email: String,
+        displayName: String,
+        credentialSourceNote: String = "${provider.displayName} · ${provider.protocolBadge}"
+    )
     fun signOutAccount()
     fun simulateDeviceChangeRestore(newDeviceModel: String, viaProvider: IdentityProvider)
+    fun simulateFcmPushEscalationTest()
 }
 
 /**
@@ -195,6 +204,43 @@ class DefaultDataRepository : DataRepository {
                 idempotencyKey = IdempotencyKey("idem-escalate-${System.nanoTime()}")
             )
         )
+        simulateFcmPushEscalationTest()
+    }
+
+    override fun simulateFcmPushEscalationTest() {
+        val current = _snapshot.value
+        val spec = current.activeRecord.spec
+        val rawMap = mapOf(
+            "idempotency_key" to "fcm-esc-${System.nanoTime()}",
+            "schema_version" to "1",
+            "sent_epoch_ms" to current.simulatedClockMillis.millis.toString(),
+            "event_type" to "CAREGIVER_ESCALATION_SLA_BREACH",
+            "patient_id" to spec.patientId.value,
+            "patient_name" to current.patientName,
+            "window_id" to spec.doseWindowId.value,
+            "medication_name" to spec.medicationName,
+            "strength_label" to spec.strengthLabel,
+            "scheduled_time_label" to spec.scheduledTimeLabel,
+            "overdue_minutes" to "30",
+            "caregiver_channel" to "FCM_HIGH_PRIORITY + SMS_FALLBACK"
+        )
+        val parseOutcome = FcmPayloadParser.parseAndDeduplicate(
+            rawData = rawMap,
+            deduplicator = FcmRuntimeRegistry.sharedDeduplicator,
+            nowEpochMs = current.simulatedClockMillis.millis
+        )
+        if (parseOutcome is FcmParseOutcome.Valid) {
+            FcmRuntimeRegistry.recordInboundPayload(parseOutcome.payload)
+            _snapshot.update { snap ->
+                snap.copy(
+                    cloudVault = snap.cloudVault.copy(
+                        fcmTokenPreview = FcmRuntimeRegistry.latestMaskedToken,
+                        fcmPushDeliveredCount = snap.cloudVault.fcmPushDeliveredCount + 1,
+                        lastFcmPushSummary = FcmRuntimeRegistry.lastPushSummary
+                    )
+                )
+            }
+        }
     }
 
     override fun resetWindowToDue(doseWindowId: DoseWindowId) {
@@ -232,7 +278,12 @@ class DefaultDataRepository : DataRepository {
         }
     }
 
-    override fun signInWithAccount(provider: IdentityProvider, email: String, displayName: String) {
+    override fun signInWithAccount(
+        provider: IdentityProvider,
+        email: String,
+        displayName: String,
+        credentialSourceNote: String
+    ) {
         _snapshot.update { current ->
             val now = EpochMillis(current.simulatedClockMillis.millis + MIN_MS)
             val timeLabel = formatClock(now.millis)
@@ -246,7 +297,7 @@ class DefaultDataRepository : DataRepository {
                 idempotencyKey = IdempotencyKey("idem-auth-${System.nanoTime()}"),
                 occurredAt = now,
                 formattedTime = timeLabel,
-                detail = "Signed in as $displayName ($email) via ${provider.displayName} (${provider.protocolBadge}) · Synced FamilyVault (${current.cloudVault.familyVaultId})"
+                detail = "Signed in as $displayName ($email) · $credentialSourceNote · Synced FamilyVault (${current.cloudVault.familyVaultId})"
             )
             current.copy(
                 caregiverName = displayName,
@@ -257,7 +308,8 @@ class DefaultDataRepository : DataRepository {
                     accountDisplayName = displayName,
                     activeProvider = provider,
                     linkedProviders = current.cloudVault.linkedProviders + provider,
-                    lastCloudCheckpointTime = timeLabel
+                    lastCloudCheckpointTime = timeLabel,
+                    credentialSourceNote = credentialSourceNote
                 )
             )
         }

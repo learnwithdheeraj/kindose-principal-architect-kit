@@ -325,6 +325,10 @@ data class CloudVaultSyncStatus(
     val currentDeviceModel: String,
     val lastCloudCheckpointTime: String,
     val deviceMigrationCount: Int,
-    val seniorPairingCode: String = "849-204"
+    val seniorPairingCode: String = "849-204",
+    val fcmTokenPreview: String = "fcm_px9pro_8841a...e92",
+    val fcmPushDeliveredCount: Int = 3,
+    val lastFcmPushSummary: String = "FCM Priority-10 Channel Armed · <250ms SLA",
+    val credentialSourceNote: String = "Android CredentialManager · GoogleIdTokenCredential"
 )
 

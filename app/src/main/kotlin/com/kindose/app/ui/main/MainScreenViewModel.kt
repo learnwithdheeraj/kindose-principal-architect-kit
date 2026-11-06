@@ -2,6 +2,9 @@ package com.kindose.app.ui.main
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.kindose.app.auth.AndroidJetpackCredentialGateway
+import com.kindose.app.auth.AuthCredentialGateway
+import com.kindose.app.auth.CredentialAuthResult
 import com.kindose.app.data.DataRepository
 import com.kindose.app.data.DefaultDataRepository
 import com.kindose.app.data.RepositorySnapshot
@@ -12,6 +15,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 
 enum class AppPersonaSurface(val title: String, val subtitle: String) {
     SENIOR_APPLIANCE(
@@ -44,7 +48,8 @@ sealed interface MainScreenUiState {
 }
 
 class MainScreenViewModel(
-    private val dataRepository: DataRepository = DefaultDataRepository()
+    private val dataRepository: DataRepository = DefaultDataRepository(),
+    private val authGateway: AuthCredentialGateway = AndroidJetpackCredentialGateway(appContext = null)
 ) : ViewModel() {
 
     private val localControls = MutableStateFlow(LocalUiControls())
@@ -80,11 +85,58 @@ class MainScreenViewModel(
     }
 
     fun onSignInWithProvider(provider: IdentityProvider, email: String, displayName: String) {
-        dataRepository.signInWithAccount(provider, email, displayName)
+        viewModelScope.launch {
+            when (val result = authGateway.authenticate(provider, email, displayName)) {
+                is CredentialAuthResult.Authenticated -> {
+                    dataRepository.signInWithAccount(
+                        provider = result.provider,
+                        email = result.email,
+                        displayName = result.displayName,
+                        credentialSourceNote = result.sourceDescription
+                    )
+                    localControls.update {
+                        it.copy(
+                            showAccountSignInSheet = false,
+                            lastStatusBanner = "Signed in as ${result.displayName} (${result.email}) via ${result.provider.displayName}"
+                        )
+                    }
+                }
+
+                is CredentialAuthResult.FallbackDemoVault -> {
+                    dataRepository.signInWithAccount(
+                        provider = result.provider,
+                        email = result.email,
+                        displayName = result.displayName,
+                        credentialSourceNote = result.fallbackReason
+                    )
+                    localControls.update {
+                        it.copy(
+                            showAccountSignInSheet = false,
+                            lastStatusBanner = "Signed in as ${result.displayName} (${result.email}) · ${result.fallbackReason}"
+                        )
+                    }
+                }
+
+                is CredentialAuthResult.Cancelled -> {
+                    localControls.update {
+                        it.copy(lastStatusBanner = "Sign-in cancelled: ${result.reason}")
+                    }
+                }
+
+                is CredentialAuthResult.TransientFailure -> {
+                    localControls.update {
+                        it.copy(lastStatusBanner = "Temporary auth error (${result.errorCode}): ${result.diagnosticMessage}")
+                    }
+                }
+            }
+        }
+    }
+
+    fun onTestFcmPushEscalation() {
+        dataRepository.simulateFcmPushEscalationTest()
         localControls.update {
             it.copy(
-                showAccountSignInSheet = false,
-                lastStatusBanner = "Signed in as $displayName ($email) via ${provider.displayName}"
+                lastStatusBanner = "Dispatched FCM Priority-10 Caregiver Alert (${dataRepository.snapshot.value.cloudVault.fcmTokenPreview})"
             )
         }
     }
