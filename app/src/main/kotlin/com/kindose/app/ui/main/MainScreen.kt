@@ -108,6 +108,9 @@ fun MainScreen(
                     onSwitchPersona = viewModel::switchPersona,
                     onToggleVisionBoost = viewModel::toggleSeniorLargeVisionBoost,
                     onToggleLedgerSheet = viewModel::toggleArchitectureLedgerSheet,
+                    onToggleAccountSheet = viewModel::toggleAccountSignInSheet,
+                    onSignInWithProvider = viewModel::onSignInWithProvider,
+                    onSignOut = viewModel::onSignOut,
                     onSelectWindow = viewModel::selectDoseWindow,
                     onSeniorConfirm = viewModel::onSeniorConfirmTap,
                     onSeniorSnooze = viewModel::onSeniorSnoozeTap,
@@ -132,6 +135,9 @@ internal fun KinDoseInteractiveScaffold(
     onSwitchPersona: (AppPersonaSurface) -> Unit,
     onToggleVisionBoost: () -> Unit,
     onToggleLedgerSheet: (Boolean) -> Unit,
+    onToggleAccountSheet: (Boolean) -> Unit = {},
+    onSignInWithProvider: (IdentityProvider, String, String) -> Unit = { _, _, _ -> },
+    onSignOut: () -> Unit = {},
     onSelectWindow: (DoseWindowId) -> Unit,
     onSeniorConfirm: () -> Unit,
     onSeniorSnooze: () -> Unit,
@@ -160,6 +166,10 @@ internal fun KinDoseInteractiveScaffold(
                 onToggleVisionBoost = {
                     haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                     onToggleVisionBoost()
+                },
+                onOpenAccountSheet = {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onToggleAccountSheet(true)
                 }
             )
         },
@@ -178,7 +188,7 @@ internal fun KinDoseInteractiveScaffold(
                     haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                     onResetScenario()
                 },
-                onOpenLedger = { onToggleLedgerSheet(true) }
+                onOpenAccountSheet = { onToggleAccountSheet(true) }
             )
         }
     ) { innerPadding ->
@@ -248,8 +258,10 @@ internal fun KinDoseInteractiveScaffold(
     }
 
     if (controls.showArchitectureLedgerSheet) {
+        val ledgerSheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)
         ModalBottomSheet(
             onDismissRequest = { onToggleLedgerSheet(false) },
+            sheetState = ledgerSheetState,
             containerColor = MaterialTheme.colorScheme.surface
         ) {
             TransactionalOutboxAndAuditSheetContent(
@@ -258,19 +270,47 @@ internal fun KinDoseInteractiveScaffold(
             )
         }
     }
+
+    if (controls.showAccountSignInSheet || !snapshot.cloudVault.isSignedIn) {
+        val accountSheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(
+            onDismissRequest = { onToggleAccountSheet(false) },
+            sheetState = accountSheetState,
+            containerColor = MaterialTheme.colorScheme.surface
+        ) {
+            AccountSignInModalSheetContent(
+                snapshot = snapshot,
+                onSignInWithProvider = onSignInWithProvider,
+                onSignOut = onSignOut,
+                onSimulateNewPhoneRestore = {
+                    onSimulateNewPhoneRestore()
+                    onToggleAccountSheet(false)
+                },
+                onOpenAuditLedger = {
+                    onToggleAccountSheet(false)
+                    onToggleLedgerSheet(true)
+                },
+                onClose = { onToggleAccountSheet(false) }
+            )
+        }
+    }
 }
 
 /**
  * Material 3 Expressive Editorial Header (Pixel Weather / Fitbit Inspired).
- * Uses bundled Google Sans Display with warm tonal pill controls and zero visual clutter.
+ * Uses bundled Google Sans Display with warm tonal pill controls and a prominent Account/Login chip.
  */
 @Composable
 private fun ExpressiveTopHeader(
     snapshot: RepositorySnapshot,
     controls: LocalUiControls,
     onSwitchPersona: (AppPersonaSurface) -> Unit,
-    onToggleVisionBoost: () -> Unit
+    onToggleVisionBoost: () -> Unit,
+    onOpenAccountSheet: () -> Unit = {}
 ) {
+    val safetyColors = KinDoseThemeTokens.safetyColors
+    val vault = snapshot.cloudVault
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -284,56 +324,128 @@ private fun ExpressiveTopHeader(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Column(
+                modifier = Modifier.weight(1f).padding(end = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
                 Text(
                     text = if (controls.activePersona == AppPersonaSurface.SENIOR_APPLIANCE) {
                         "Good morning, Eleanor"
                     } else {
                         "Eleanor's Care Circle"
                     },
-                    style = MaterialTheme.typography.headlineMedium,
+                    style = MaterialTheme.typography.headlineSmall,
                     color = MaterialTheme.colorScheme.onBackground,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.semantics { heading() }
                 )
                 Text(
-                    text = "Friday, Nov 6 · ${snapshot.activeRecord.spec.scheduledTimeLabel} Window",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    text = if (vault.isSignedIn) {
+                        "Synced · ${vault.activeProvider.displayName} (${vault.primaryEmail})"
+                    } else {
+                        "Local Offline Mode · Tap Sign In to link cloud backup"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
 
-            // Sleek Pill Toggle for Low-Vision Scale Boost
-            Surface(
-                onClick = onToggleVisionBoost,
-                shape = CircleShape,
-                color = if (controls.seniorLargeVisionBoost) {
-                    MaterialTheme.colorScheme.primary
-                } else {
-                    MaterialTheme.colorScheme.surfaceVariant
-                },
-                modifier = Modifier
-                    .height(40.dp)
-                    .semantics {
-                        contentDescription = "Toggle Large Text Accessibility Mode"
-                        stateDescription = if (controls.seniorLargeVisionBoost) "Enabled" else "Standard"
-                    }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Text(
-                        text = if (controls.seniorLargeVisionBoost) "Aa+" else "Aa",
-                        style = MaterialTheme.typography.labelLarge,
-                        fontFamily = GoogleSansDisplayFamily,
-                        fontWeight = FontWeight.Bold,
-                        color = if (controls.seniorLargeVisionBoost) {
-                            MaterialTheme.colorScheme.onPrimary
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
+                // Prominent Account / Login Pill Button
+                Surface(
+                    onClick = onOpenAccountSheet,
+                    shape = CircleShape,
+                    color = if (vault.isSignedIn) {
+                        MaterialTheme.colorScheme.primaryContainer
+                    } else {
+                        safetyColors.shieldAmberContainer
+                    },
+                    modifier = Modifier
+                        .height(40.dp)
+                        .semantics {
+                            role = Role.Button
+                            contentDescription = "Open Sign In and Cloud Account Switcher"
                         }
-                    )
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Surface(
+                            shape = CircleShape,
+                            color = if (vault.isSignedIn) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                safetyColors.shieldAmber
+                            },
+                            modifier = Modifier.size(22.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = if (vault.isSignedIn) {
+                                        vault.accountDisplayName.take(1).uppercase()
+                                    } else {
+                                        "+"
+                                    },
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                        Text(
+                            text = if (vault.isSignedIn) "Account" else "Sign In",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontFamily = GoogleSansDisplayFamily,
+                            fontWeight = FontWeight.Bold,
+                            color = if (vault.isSignedIn) {
+                                MaterialTheme.colorScheme.onPrimaryContainer
+                            } else {
+                                safetyColors.onShieldAmberContainer
+                            }
+                        )
+                    }
+                }
+
+                // Sleek Pill Toggle for Low-Vision Scale Boost
+                Surface(
+                    onClick = onToggleVisionBoost,
+                    shape = CircleShape,
+                    color = if (controls.seniorLargeVisionBoost) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.surfaceVariant
+                    },
+                    modifier = Modifier
+                        .height(40.dp)
+                        .semantics {
+                            contentDescription = "Toggle Large Text Accessibility Mode"
+                            stateDescription = if (controls.seniorLargeVisionBoost) "Enabled" else "Standard"
+                        }
+                ) {
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier.padding(horizontal = 12.dp)
+                    ) {
+                        Text(
+                            text = if (controls.seniorLargeVisionBoost) "Aa+" else "Aa",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontFamily = GoogleSansDisplayFamily,
+                            fontWeight = FontWeight.Bold,
+                            color = if (controls.seniorLargeVisionBoost) {
+                                MaterialTheme.colorScheme.onPrimary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            }
+                        )
+                    }
                 }
             }
         }
@@ -1322,7 +1434,7 @@ private fun FloatingScenarioPillBar(
     onSimulateDuplicateTap: () -> Unit,
     onSimulateEscalation: () -> Unit,
     onResetScenario: () -> Unit,
-    onOpenLedger: () -> Unit
+    onOpenAccountSheet: () -> Unit
 ) {
     Box(
         modifier = Modifier
@@ -1389,16 +1501,369 @@ private fun FloatingScenarioPillBar(
                 }
 
                 Surface(
-                    onClick = onOpenLedger,
+                    onClick = onOpenAccountSheet,
                     shape = CircleShape,
                     color = MaterialTheme.colorScheme.surfaceVariant
                 ) {
                     Text(
-                        text = "Logs",
+                        text = "Sign In",
                         style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
                         maxLines = 1,
                         softWrap = false,
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * First-Class Multi-Provider Sign-In, CredentialManager & Zero-Loss Device Restore Sheet.
+ * Supports:
+ * 1. Continue with Google (Jetpack CredentialManager / GetGoogleIdOption)
+ * 2. Sign in with Biometric Passkey (FIDO2 / WebAuthn)
+ * 3. Continue with Facebook (OAuth 2.1)
+ * 4. Continue with Apple (OIDC)
+ * 5. Senior Zero-Password QR Pairing Code (`849-204`)
+ * 6. One-Tap New Phone Restore & Sign Out
+ */
+@Composable
+private fun AccountSignInModalSheetContent(
+    snapshot: RepositorySnapshot,
+    onSignInWithProvider: (IdentityProvider, String, String) -> Unit,
+    onSignOut: () -> Unit,
+    onSimulateNewPhoneRestore: () -> Unit,
+    onOpenAuditLedger: () -> Unit,
+    onClose: () -> Unit
+) {
+    val safetyColors = KinDoseThemeTokens.safetyColors
+    val vault = snapshot.cloudVault
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 22.dp, vertical = 8.dp)
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(
+                modifier = Modifier.weight(1f).padding(end = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Text(
+                    text = "Sign In & Cloud Vault",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontFamily = GoogleSansDisplayFamily,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.semantics { heading() }
+                )
+                Text(
+                    text = "Keep schedules & streaks safe across any phone change",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            TextButton(onClick = onClose) {
+                Text("Close")
+            }
+        }
+
+        // Active Account Banner
+        Surface(
+            color = if (vault.isSignedIn) {
+                safetyColors.safeEmeraldContainer
+            } else {
+                safetyColors.shieldAmberContainer
+            },
+            shape = RoundedCornerShape(24.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f).padding(end = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Text(
+                        text = if (vault.isSignedIn) {
+                            "${vault.accountDisplayName} · ${vault.activeProvider.displayName}"
+                        } else {
+                            "Signed Out (Local Offline Mode)"
+                        },
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = if (vault.isSignedIn) {
+                            safetyColors.onSafeEmeraldContainer
+                        } else {
+                            safetyColors.onShieldAmberContainer
+                        }
+                    )
+                    Text(
+                        text = if (vault.isSignedIn) {
+                            "${vault.primaryEmail} · ${vault.currentDeviceModel}"
+                        } else {
+                            "Select any provider below to restore your Family Vault"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (vault.isSignedIn) {
+                            safetyColors.onSafeEmeraldContainer.copy(alpha = 0.85f)
+                        } else {
+                            safetyColors.onShieldAmberContainer.copy(alpha = 0.85f)
+                        }
+                    )
+                }
+
+                if (vault.isSignedIn) {
+                    Surface(
+                        onClick = onSignOut,
+                        shape = CircleShape,
+                        color = Color.White.copy(alpha = 0.75f)
+                    ) {
+                        Text(
+                            text = "Sign Out",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = safetyColors.onSafeEmeraldContainer,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        Text(
+            text = "CHOOSE SIGN-IN METHOD (JETPACK CREDENTIAL MANAGER)",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        // 1. Continue with Google
+        ProviderSignInButton(
+            badgeText = "G",
+            badgeColor = Color(0xFF4285F4),
+            title = "Continue with Google",
+            subtitle = "One-tap Android CredentialManager · maya.vance@gmail.com",
+            isCurrent = vault.isSignedIn && vault.activeProvider == IdentityProvider.GOOGLE_ONE_TAP,
+            onClick = {
+                onSignInWithProvider(
+                    IdentityProvider.GOOGLE_ONE_TAP,
+                    "maya.vance@gmail.com",
+                    "Maya Vance"
+                )
+            }
+        )
+
+        // 2. Sign in with Biometric Passkey
+        ProviderSignInButton(
+            badgeText = "PK",
+            badgeColor = Color(0xFF0D7452),
+            title = "Sign in with Biometric Passkey",
+            subtitle = "FIDO2 / WebAuthn Fingerprint · Synced in Google Password Manager",
+            isCurrent = vault.isSignedIn && vault.activeProvider == IdentityProvider.PASSKEY_FIDO2,
+            onClick = {
+                onSignInWithProvider(
+                    IdentityProvider.PASSKEY_FIDO2,
+                    "maya.vance@passkey.local",
+                    "Maya Vance (Passkey)"
+                )
+            }
+        )
+
+        // 3. Continue with Facebook
+        ProviderSignInButton(
+            badgeText = "f",
+            badgeColor = Color(0xFF1877F2),
+            title = "Continue with Facebook",
+            subtitle = "Meta OAuth 2.1 · Linked to Family Vault ${vault.familyVaultId}",
+            isCurrent = vault.isSignedIn && vault.activeProvider == IdentityProvider.FACEBOOK_OAUTH,
+            onClick = {
+                onSignInWithProvider(
+                    IdentityProvider.FACEBOOK_OAUTH,
+                    "maya.vance.fb@facebook.com",
+                    "Maya Vance (FB)"
+                )
+            }
+        )
+
+        // 4. Continue with Apple ID
+        ProviderSignInButton(
+            badgeText = "A",
+            badgeColor = Color(0xFF1F2937),
+            title = "Continue with Apple",
+            subtitle = "Apple OIDC · Cross-platform family access",
+            isCurrent = vault.isSignedIn && vault.activeProvider == IdentityProvider.APPLE_ID,
+            onClick = {
+                onSignInWithProvider(
+                    IdentityProvider.APPLE_ID,
+                    "maya.vance@icloud.com",
+                    "Maya Vance (Apple)"
+                )
+            }
+        )
+
+        // 5. Senior Zero-Password QR Pairing Card
+        Surface(
+            onClick = {
+                onSignInWithProvider(
+                    IdentityProvider.SENIOR_QR_PAIRING,
+                    "eleanor.paired@kindose.family",
+                    "Eleanor's Paired Phone"
+                )
+            },
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
+            shape = RoundedCornerShape(22.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier.padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.surface,
+                    modifier = Modifier.size(52.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(
+                            text = "QR",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontFamily = GoogleSansMonoFamily,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Pair Mom's Phone via QR Code (${vault.seniorPairingCode})",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "Zero passwords for seniors — scan from caregiver's phone",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+
+        // Device Migration & Audit Actions
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            FilledTonalButton(
+                onClick = onSimulateNewPhoneRestore,
+                shape = RoundedCornerShape(18.dp),
+                modifier = Modifier.weight(1f).heightIn(min = 50.dp)
+            ) {
+                Text("Simulate New Phone Restore")
+            }
+            OutlinedButton(
+                onClick = onOpenAuditLedger,
+                shape = RoundedCornerShape(18.dp),
+                modifier = Modifier.heightIn(min = 50.dp)
+            ) {
+                Text("Audit Logs")
+            }
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
+    }
+}
+
+@Composable
+private fun ProviderSignInButton(
+    badgeText: String,
+    badgeColor: Color,
+    title: String,
+    subtitle: String,
+    isCurrent: Boolean,
+    onClick: () -> Unit
+) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(22.dp),
+        color = if (isCurrent) {
+            MaterialTheme.colorScheme.primaryContainer
+        } else {
+            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+        },
+        modifier = Modifier
+            .fillMaxWidth()
+            .semantics(mergeDescendants = true) {
+                role = Role.Button
+                contentDescription = "$title, $subtitle"
+            }
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Surface(
+                shape = CircleShape,
+                color = badgeColor,
+                modifier = Modifier.size(44.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Text(
+                        text = badgeText,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontFamily = GoogleSansDisplayFamily,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                }
+            }
+
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontFamily = GoogleSansDisplayFamily,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            if (isCurrent) {
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primary
+                ) {
+                    Text(
+                        text = "Active",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
                     )
                 }
             }

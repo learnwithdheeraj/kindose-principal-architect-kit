@@ -298,25 +298,33 @@ enum class IdentityProvider(
         description = "Hardware-backed passkey synced via Google Password Manager"
     ),
     FACEBOOK_OAUTH(
-        displayName = "Facebook Login",
+        displayName = "Facebook",
         protocolBadge = "OIDC / OAuth 2.1",
-        description = "Federated social identity linked to canonical FamilyVaultId"
+        description = "Continue with Facebook social account"
+    ),
+    APPLE_ID(
+        displayName = "Apple ID",
+        protocolBadge = "Sign in with Apple",
+        description = "Continue with Apple private relay or iCloud ID"
     ),
     SENIOR_QR_PAIRING(
-        displayName = "Senior Zero-Login QR",
+        displayName = "Senior QR Code",
         protocolBadge = "Ed25519 Hardware Key",
-        description = "Caregiver scans 1-time QR on Mom's new phone — zero typing"
+        description = "Scan 1-time QR from caregiver phone — zero typing"
     )
 }
 
 data class CloudVaultSyncStatus(
+    val isSignedIn: Boolean,
     val familyVaultId: String,
     val primaryEmail: String,
+    val accountDisplayName: String,
     val activeProvider: IdentityProvider,
     val linkedProviders: Set<IdentityProvider>,
     val blockStoreAutoRestoreEnabled: Boolean,
     val currentDeviceModel: String,
     val lastCloudCheckpointTime: String,
-    val deviceMigrationCount: Int
+    val deviceMigrationCount: Int,
+    val seniorPairingCode: String = "849-204"
 )
 

@@ -28,6 +28,7 @@ data class LocalUiControls(
     val activePersona: AppPersonaSurface = AppPersonaSurface.SENIOR_APPLIANCE,
     val seniorLargeVisionBoost: Boolean = false,
     val showArchitectureLedgerSheet: Boolean = false,
+    val showAccountSignInSheet: Boolean = false,
     val lastStatusBanner: String? = null
 )
 
@@ -72,6 +73,30 @@ class MainScreenViewModel(
 
     fun toggleArchitectureLedgerSheet(show: Boolean) {
         localControls.update { it.copy(showArchitectureLedgerSheet = show) }
+    }
+
+    fun toggleAccountSignInSheet(show: Boolean) {
+        localControls.update { it.copy(showAccountSignInSheet = show) }
+    }
+
+    fun onSignInWithProvider(provider: IdentityProvider, email: String, displayName: String) {
+        dataRepository.signInWithAccount(provider, email, displayName)
+        localControls.update {
+            it.copy(
+                showAccountSignInSheet = false,
+                lastStatusBanner = "Signed in as $displayName ($email) via ${provider.displayName}"
+            )
+        }
+    }
+
+    fun onSignOut() {
+        dataRepository.signOutAccount()
+        localControls.update {
+            it.copy(
+                showAccountSignInSheet = true,
+                lastStatusBanner = "Signed out — Choose Google, Passkey, Facebook, Apple, or QR Pairing to sign in"
+            )
+        }
     }
 
     fun selectDoseWindow(doseWindowId: DoseWindowId) {

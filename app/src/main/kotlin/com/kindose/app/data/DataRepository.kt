@@ -41,6 +41,8 @@ interface DataRepository {
     fun simulateFastForwardToEscalation(doseWindowId: DoseWindowId)
     fun resetWindowToDue(doseWindowId: DoseWindowId)
     fun switchIdentityProvider(provider: IdentityProvider)
+    fun signInWithAccount(provider: IdentityProvider, email: String, displayName: String)
+    fun signOutAccount()
     fun simulateDeviceChangeRestore(newDeviceModel: String, viaProvider: IdentityProvider)
 }
 
@@ -222,8 +224,50 @@ class DefaultDataRepository : DataRepository {
             val updatedLinked = current.cloudVault.linkedProviders + provider
             current.copy(
                 cloudVault = current.cloudVault.copy(
+                    isSignedIn = true,
                     activeProvider = provider,
                     linkedProviders = updatedLinked
+                )
+            )
+        }
+    }
+
+    override fun signInWithAccount(provider: IdentityProvider, email: String, displayName: String) {
+        _snapshot.update { current ->
+            val now = EpochMillis(current.simulatedClockMillis.millis + MIN_MS)
+            val timeLabel = formatClock(now.millis)
+            val authAudit = AuditLogEntry(
+                auditId = "AUD-${1000 + sequenceCounter++}",
+                doseWindowId = current.activeWindowId,
+                medicationName = "CredentialManager Auth",
+                fromState = if (current.cloudVault.isSignedIn) "SIGNED_IN" else "SIGNED_OUT",
+                toState = provider.name,
+                commandName = "OnSignInSuccess",
+                idempotencyKey = IdempotencyKey("idem-auth-${System.nanoTime()}"),
+                occurredAt = now,
+                formattedTime = timeLabel,
+                detail = "Signed in as $displayName ($email) via ${provider.displayName} (${provider.protocolBadge}) · Synced FamilyVault (${current.cloudVault.familyVaultId})"
+            )
+            current.copy(
+                caregiverName = displayName,
+                auditLedger = listOf(authAudit) + current.auditLedger,
+                cloudVault = current.cloudVault.copy(
+                    isSignedIn = true,
+                    primaryEmail = email,
+                    accountDisplayName = displayName,
+                    activeProvider = provider,
+                    linkedProviders = current.cloudVault.linkedProviders + provider,
+                    lastCloudCheckpointTime = timeLabel
+                )
+            )
+        }
+    }
+
+    override fun signOutAccount() {
+        _snapshot.update { current ->
+            current.copy(
+                cloudVault = current.cloudVault.copy(
+                    isSignedIn = false
                 )
             )
         }
@@ -354,13 +398,16 @@ class DefaultDataRepository : DataRepository {
             adherenceStreakDays = 14,
             thirtyDayAdherencePercent = 98,
             cloudVault = CloudVaultSyncStatus(
+                isSignedIn = true,
                 familyVaultId = "vault-vance-family-9f82a",
                 primaryEmail = "maya.vance@gmail.com",
+                accountDisplayName = "Maya Vance",
                 activeProvider = IdentityProvider.GOOGLE_ONE_TAP,
                 linkedProviders = setOf(
                     IdentityProvider.GOOGLE_ONE_TAP,
                     IdentityProvider.PASSKEY_FIDO2,
                     IdentityProvider.FACEBOOK_OAUTH,
+                    IdentityProvider.APPLE_ID,
                     IdentityProvider.SENIOR_QR_PAIRING
                 ),
                 blockStoreAutoRestoreEnabled = true,
