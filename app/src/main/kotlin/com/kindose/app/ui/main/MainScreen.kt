@@ -1,5 +1,9 @@
 package com.kindose.app.ui.main
 
+import android.accounts.AccountManager
+import android.app.Activity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
@@ -1541,6 +1545,32 @@ private fun AccountSignInModalSheetContent(
     val safetyColors = KinDoseThemeTokens.safetyColors
     val vault = snapshot.cloudVault
 
+    val googleAccountPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val selectedEmail = result.data
+                ?.getStringExtra(AccountManager.KEY_ACCOUNT_NAME)
+                ?.trim()
+                .orEmpty()
+            if (selectedEmail.isNotEmpty()) {
+                val localPart = selectedEmail.substringBefore("@")
+                val formattedName = localPart
+                    .split(".", "_", "-")
+                    .filter { it.isNotBlank() }
+                    .joinToString(" ") { part ->
+                        part.replaceFirstChar { ch -> ch.uppercase() }
+                    }
+                    .ifBlank { selectedEmail }
+                onSignInWithProvider(
+                    IdentityProvider.GOOGLE_ONE_TAP,
+                    selectedEmail,
+                    formattedName
+                )
+            }
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1649,19 +1679,37 @@ private fun AccountSignInModalSheetContent(
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
-        // 1. Continue with Google
+        // 1. Continue with Google (Launches real Android OS Google Account Picker on device)
         ProviderSignInButton(
             badgeText = "G",
             badgeColor = Color(0xFF4285F4),
             title = "Continue with Google",
-            subtitle = "One-tap Android CredentialManager · maya.vance@gmail.com",
+            subtitle = if (vault.isSignedIn && vault.activeProvider == IdentityProvider.GOOGLE_ONE_TAP) {
+                "Signed in as ${vault.primaryEmail} · Tap to switch Google account"
+            } else {
+                "Choose a Google account on this device (Google Play Services)"
+            },
             isCurrent = vault.isSignedIn && vault.activeProvider == IdentityProvider.GOOGLE_ONE_TAP,
             onClick = {
-                onSignInWithProvider(
-                    IdentityProvider.GOOGLE_ONE_TAP,
-                    "maya.vance@gmail.com",
-                    "Maya Vance"
-                )
+                try {
+                    @Suppress("DEPRECATION")
+                    val chooseAccountIntent = AccountManager.newChooseAccountIntent(
+                        null,
+                        null,
+                        arrayOf("com.google"),
+                        null,
+                        null,
+                        null,
+                        null
+                    )
+                    googleAccountPickerLauncher.launch(chooseAccountIntent)
+                } catch (_: Throwable) {
+                    onSignInWithProvider(
+                        IdentityProvider.GOOGLE_ONE_TAP,
+                        "maya.vance@gmail.com",
+                        "Maya Vance"
+                    )
+                }
             }
         )
 
