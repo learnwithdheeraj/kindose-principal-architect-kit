@@ -1065,7 +1065,7 @@ internal fun CaregiverCommandCenterSurface(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
+                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
                         Text(
                             text = "${snapshot.patientName}'s Safety Telemetry",
                             style = MaterialTheme.typography.titleLarge,
@@ -1141,7 +1141,7 @@ internal fun CaregiverCommandCenterSurface(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
+                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
                         Text(
                             text = "Identity & Multi-Device Sync Vault",
                             style = MaterialTheme.typography.titleLarge,
