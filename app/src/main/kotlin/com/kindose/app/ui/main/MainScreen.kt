@@ -2,6 +2,8 @@ package com.kindose.app.ui.main
 
 import android.accounts.AccountManager
 import android.app.Activity
+import android.content.Intent
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
@@ -37,6 +39,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.*
@@ -47,6 +50,8 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation3.runtime.NavKey
@@ -1544,6 +1549,22 @@ private fun AccountSignInModalSheetContent(
 ) {
     val safetyColors = KinDoseThemeTokens.safetyColors
     val vault = snapshot.cloudVault
+    val context = LocalContext.current
+    var showGm3GooglePicker by remember { mutableStateOf(false) }
+    var deviceGoogleEmails by remember { mutableStateOf(emptyList<String>()) }
+
+    fun refreshDeviceGoogleAccounts(): List<String> {
+        val discovered = try {
+            AccountManager.get(context)
+                .getAccountsByType("com.google")
+                .mapNotNull { it.name?.trim() }
+                .filter { it.isNotEmpty() }
+        } catch (_: Throwable) {
+            emptyList()
+        }
+        deviceGoogleEmails = discovered
+        return discovered
+    }
 
     val googleAccountPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
@@ -1554,6 +1575,7 @@ private fun AccountSignInModalSheetContent(
                 ?.trim()
                 .orEmpty()
             if (selectedEmail.isNotEmpty()) {
+                deviceGoogleEmails = (listOf(selectedEmail) + deviceGoogleEmails).distinct()
                 val localPart = selectedEmail.substringBefore("@")
                 val formattedName = localPart
                     .split(".", "_", "-")
@@ -1569,6 +1591,33 @@ private fun AccountSignInModalSheetContent(
                 )
             }
         }
+    }
+
+    if (showGm3GooglePicker) {
+        Gm3ExpressiveGoogleAccountPickerDialog(
+            discoveredEmails = deviceGoogleEmails,
+            activeEmail = if (vault.isSignedIn) vault.primaryEmail else null,
+            onSelectGoogleAccount = { email, displayName ->
+                showGm3GooglePicker = false
+                onSignInWithProvider(IdentityProvider.GOOGLE_ONE_TAP, email, displayName)
+            },
+            onAddAnotherGoogleAccount = {
+                showGm3GooglePicker = false
+                try {
+                    val addAccountIntent = Intent(Settings.ACTION_ADD_ACCOUNT).apply {
+                        putExtra(Settings.EXTRA_ACCOUNT_TYPES, arrayOf("com.google"))
+                    }
+                    googleAccountPickerLauncher.launch(addAccountIntent)
+                } catch (_: Throwable) {
+                    @Suppress("DEPRECATION")
+                    val fallbackIntent = AccountManager.newChooseAccountIntent(
+                        null, null, arrayOf("com.google"), null, null, null, null
+                    )
+                    googleAccountPickerLauncher.launch(fallbackIntent)
+                }
+            },
+            onDismiss = { showGm3GooglePicker = false }
+        )
     }
 
     Column(
@@ -1679,7 +1728,7 @@ private fun AccountSignInModalSheetContent(
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
-        // 1. Continue with Google (Launches real Android OS Google Account Picker on device)
+        // 1. Continue with Google (Launches GM3 Expressive CredentialManager Account Switcher)
         ProviderSignInButton(
             badgeText = "G",
             badgeColor = Color(0xFF4285F4),
@@ -1687,29 +1736,12 @@ private fun AccountSignInModalSheetContent(
             subtitle = if (vault.isSignedIn && vault.activeProvider == IdentityProvider.GOOGLE_ONE_TAP) {
                 "Signed in as ${vault.primaryEmail} · Tap to switch Google account"
             } else {
-                "Choose a Google account on this device (Google Play Services)"
+                "GM3 Expressive Google Account Switcher (Device com.google)"
             },
             isCurrent = vault.isSignedIn && vault.activeProvider == IdentityProvider.GOOGLE_ONE_TAP,
             onClick = {
-                try {
-                    @Suppress("DEPRECATION")
-                    val chooseAccountIntent = AccountManager.newChooseAccountIntent(
-                        null,
-                        null,
-                        arrayOf("com.google"),
-                        null,
-                        null,
-                        null,
-                        null
-                    )
-                    googleAccountPickerLauncher.launch(chooseAccountIntent)
-                } catch (_: Throwable) {
-                    onSignInWithProvider(
-                        IdentityProvider.GOOGLE_ONE_TAP,
-                        "maya.vance@gmail.com",
-                        "Maya Vance"
-                    )
-                }
+                refreshDeviceGoogleAccounts()
+                showGm3GooglePicker = true
             }
         )
 
@@ -1868,6 +1900,284 @@ private fun AccountSignInModalSheetContent(
         }
 
         Spacer(modifier = Modifier.height(20.dp))
+    }
+}
+
+/**
+ * Latest Google Material 3 Expressive (`GM3`) One-Google / CredentialManager Account Switcher.
+ * Replaces the legacy AOSP Material 2 radio-button dialog with a 32dp Expressive container,
+ * 4-color Google ring avatar, Google Sans Display typography, and pill-shaped "Continue as" CTA.
+ */
+@Composable
+private fun Gm3ExpressiveGoogleAccountPickerDialog(
+    discoveredEmails: List<String>,
+    activeEmail: String?,
+    onSelectGoogleAccount: (email: String, displayName: String) -> Unit,
+    onAddAnotherGoogleAccount: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val accountsToDisplay = remember(discoveredEmails, activeEmail) {
+        val base = discoveredEmails.toMutableList()
+        if (!activeEmail.isNullOrBlank() && activeEmail.contains("@") && activeEmail !in base) {
+            base.add(activeEmail)
+        }
+        base.distinct()
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            shape = RoundedCornerShape(32.dp),
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 6.dp,
+            shadowElevation = 14.dp,
+            modifier = Modifier.fillMaxWidth(0.92f)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(22.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                // GM3 Header: 4-Color Google Badge + Google Sans Display Title
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        modifier = Modifier.weight(1f).padding(end = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        GoogleFourColorRingBadge(initial = "G", sizeDp = 36)
+                        Column {
+                            Text(
+                                text = "Sign in with Google",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontFamily = GoogleSansDisplayFamily,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "Choose an account on this device",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    TextButton(onClick = onDismiss) {
+                        Text("Close")
+                    }
+                }
+
+                // Discovered Device Google Accounts (GM3 Expressive Cards, Zero M2 Radio Buttons)
+                accountsToDisplay.forEach { email ->
+                    val localPart = email.substringBefore("@")
+                    val formattedName = localPart
+                        .split(".", "_", "-")
+                        .filter { it.isNotBlank() }
+                        .joinToString(" ") { part ->
+                            part.replaceFirstChar { ch -> ch.uppercase() }
+                        }
+                        .ifBlank { email }
+                    val firstName = formattedName.substringBefore(" ")
+                    val isSelected = email.equals(activeEmail, ignoreCase = true)
+
+                    Surface(
+                        onClick = { onSelectGoogleAccount(email, formattedName) },
+                        shape = RoundedCornerShape(24.dp),
+                        color = if (isSelected) {
+                            MaterialTheme.colorScheme.primaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f)
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                GoogleFourColorRingBadge(
+                                    initial = formattedName.take(1).uppercase(),
+                                    sizeDp = 46
+                                )
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = formattedName,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontFamily = GoogleSansDisplayFamily,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = email,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                if (isSelected) {
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = MaterialTheme.colorScheme.primary
+                                    ) {
+                                        Text(
+                                            text = "Signed In",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onPrimary,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                        )
+                                    }
+                                }
+                            }
+
+                            // GM3 Expressive Full-Width Pill Button ("Continue as ...")
+                            Button(
+                                onClick = { onSelectGoogleAccount(email, formattedName) },
+                                shape = CircleShape,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFF0B57D0),
+                                    contentColor = Color.White
+                                ),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(48.dp)
+                            ) {
+                                Text(
+                                    text = "Continue as $firstName",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontFamily = GoogleSansDisplayFamily,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Add Another Google Account Pill Row
+                Surface(
+                    onClick = onAddAnotherGoogleAccount,
+                    shape = RoundedCornerShape(20.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = "+",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                            }
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Use another Google account",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontFamily = GoogleSansDisplayFamily,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "Add or switch via Google Play Services",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun GoogleFourColorRingBadge(
+    initial: String,
+    sizeDp: Int
+) {
+    Box(
+        modifier = Modifier.size(sizeDp.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val stroke = 3.2.dp.toPx()
+            val inset = stroke / 2f
+            val arcSize = Size(size.width - stroke, size.height - stroke)
+            val topLeft = Offset(inset, inset)
+            // Google 4-Color Expressive Ring (Blue, Red, Yellow, Green)
+            drawArc(
+                color = Color(0xFF4285F4),
+                startAngle = -45f,
+                sweepAngle = 100f,
+                useCenter = false,
+                topLeft = topLeft,
+                size = arcSize,
+                style = Stroke(width = stroke, cap = StrokeCap.Round)
+            )
+            drawArc(
+                color = Color(0xFFEA4335),
+                startAngle = 185f,
+                sweepAngle = 90f,
+                useCenter = false,
+                topLeft = topLeft,
+                size = arcSize,
+                style = Stroke(width = stroke, cap = StrokeCap.Round)
+            )
+            drawArc(
+                color = Color(0xFFFBBC05),
+                startAngle = 115f,
+                sweepAngle = 70f,
+                useCenter = false,
+                topLeft = topLeft,
+                size = arcSize,
+                style = Stroke(width = stroke, cap = StrokeCap.Round)
+            )
+            drawArc(
+                color = Color(0xFF34A853),
+                startAngle = 55f,
+                sweepAngle = 60f,
+                useCenter = false,
+                topLeft = topLeft,
+                size = arcSize,
+                style = Stroke(width = stroke, cap = StrokeCap.Round)
+            )
+        }
+        Surface(
+            shape = CircleShape,
+            color = Color(0xFFE8F0FE),
+            modifier = Modifier.size((sizeDp - 8).dp)
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Text(
+                    text = initial,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontFamily = GoogleSansDisplayFamily,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF0B57D0)
+                )
+            }
+        }
     }
 }
 
