@@ -4,60 +4,52 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 
-// Google Material 3 Expressive Core Palette (Medical Trust Cobalt & Emerald)
-val primaryLight = Color(0xFF0B57D0)
+// Google Material 3 Expressive Warm Sage & Botanical Wellness Palette (Google Health / Pixel Aesthetic)
+val primaryLight = Color(0xFF0E6B50)
 val onPrimaryLight = Color(0xFFFFFFFF)
-val primaryContainerLight = Color(0xFFD3E3FD)
-val onPrimaryContainerLight = Color(0xFF041E49)
+val primaryContainerLight = Color(0xFFD2F5E6)
+val onPrimaryContainerLight = Color(0xFF052E22)
 
-val secondaryLight = Color(0xFF006874)
+val secondaryLight = Color(0xFF3E5F55)
 val onSecondaryLight = Color(0xFFFFFFFF)
-val secondaryContainerLight = Color(0xFF97F0FF)
-val onSecondaryContainerLight = Color(0xFF001F24)
+val secondaryContainerLight = Color(0xFFE3EFEA)
+val onSecondaryContainerLight = Color(0xFF132A23)
 
-val tertiaryLight = Color(0xFF0D7A4E)
+val tertiaryLight = Color(0xFF285EA7)
 val onTertiaryLight = Color(0xFFFFFFFF)
-val tertiaryContainerLight = Color(0xFFD3F9E5)
-val onTertiaryContainerLight = Color(0xFF002112)
+val tertiaryContainerLight = Color(0xFFDCE7FF)
+val onTertiaryContainerLight = Color(0xFF0A254E)
 
-val backgroundLight = Color(0xFFF8FAFD)
-val onBackgroundLight = Color(0xFF191C20)
+val backgroundLight = Color(0xFFF3F6F4) // Warm Organic Sage-Tinted Alabaster Canvas
+val onBackgroundLight = Color(0xFF111815)
 val surfaceLight = Color(0xFFFFFFFF)
-val onSurfaceLight = Color(0xFF191C20)
-val surfaceVariantLight = Color(0xFFEDF2FA)
-val onSurfaceVariantLight = Color(0xFF44474E)
+val onSurfaceLight = Color(0xFF111815)
+val surfaceVariantLight = Color(0xFFE7EDE9)
+val onSurfaceVariantLight = Color(0xFF45534D)
 
-// Dark Palette (OLED Senior Night-Safe High Contrast)
-val primaryDark = Color(0xFFA8C7FA)
-val onPrimaryDark = Color(0xFF062E6F)
-val primaryContainerDark = Color(0xFF0842A0)
-val onPrimaryContainerDark = Color(0xFFD3E3FD)
+// Dark Palette (OLED Night Sanctuary)
+val primaryDark = Color(0xFF5EEAD4)
+val onPrimaryDark = Color(0xFF033025)
+val primaryContainerDark = Color(0xFF0A4F3C)
+val onPrimaryContainerDark = Color(0xFFD2F5E6)
 
-val secondaryDark = Color(0xFF4FD8EB)
-val onSecondaryDark = Color(0xFF00363D)
-val secondaryContainerDark = Color(0xFF004F58)
-val onSecondaryContainerDark = Color(0xFF97F0FF)
+val secondaryDark = Color(0xFFA7C4BC)
+val onSecondaryDark = Color(0xFF152C25)
+val secondaryContainerDark = Color(0xFF253B34)
+val onSecondaryContainerDark = Color(0xFFE3EFEA)
 
-val tertiaryDark = Color(0xFF66DBA8)
-val onTertiaryDark = Color(0xFF003821)
-val tertiaryContainerDark = Color(0xFF005232)
-val onTertiaryContainerDark = Color(0xFFD3F9E5)
+val tertiaryDark = Color(0xFF93C5FD)
+val onTertiaryDark = Color(0xFF0D2B54)
+val tertiaryContainerDark = Color(0xFF1E3A5F)
+val onTertiaryContainerDark = Color(0xFFDCE7FF)
 
-val backgroundDark = Color(0xFF0E131A)
-val onBackgroundDark = Color(0xFFE2E8F0)
-val surfaceDark = Color(0xFF161D26)
-val onSurfaceDark = Color(0xFFE2E8F0)
-val surfaceVariantDark = Color(0xFF222B38)
-val onSurfaceVariantDark = Color(0xFFC4C6D0)
+val backgroundDark = Color(0xFF0C1210)
+val onBackgroundDark = Color(0xFFE6F0EC)
+val surfaceDark = Color(0xFF141D1A)
+val onSurfaceDark = Color(0xFFE6F0EC)
+val surfaceVariantDark = Color(0xFF1F2B27)
+val onSurfaceVariantDark = Color(0xFFAAB8B2)
 
-/**
- * Semantic Clinical Safety Palette (WCAG AAA Contrast Verified).
- * Ensures unmistakable visual states for:
- * - Safe Confirmation (Emerald)
- * - Double-Dose Prevention Lockout Shield (Amber Warning)
- * - Caregiver Escalation Breach (Crimson Alert)
- * - Bounded Snooze Waiting (Indigo)
- */
 @Immutable
 data class KinDoseSafetyColors(
     val safeEmerald: Color,
@@ -78,21 +70,21 @@ data class KinDoseSafetyColors(
 )
 
 val LightSafetyColors = KinDoseSafetyColors(
-    safeEmerald = Color(0xFF0B6E4F),
+    safeEmerald = Color(0xFF0D7452),
     onSafeEmerald = Color(0xFFFFFFFF),
-    safeEmeraldContainer = Color(0xFFD1FAE5),
-    onSafeEmeraldContainer = Color(0xFF064E3B),
-    shieldAmber = Color(0xFFB45309),
+    safeEmeraldContainer = Color(0xFFD8F8EA),
+    onSafeEmeraldContainer = Color(0xFF063826),
+    shieldAmber = Color(0xFFB85400),
     onShieldAmber = Color(0xFFFFFFFF),
-    shieldAmberContainer = Color(0xFFFEF3C7),
-    onShieldAmberContainer = Color(0xFF78350F),
-    escalationCrimson = Color(0xFFB91C1C),
+    shieldAmberContainer = Color(0xFFFFECCC),
+    onShieldAmberContainer = Color(0xFF4A2000),
+    escalationCrimson = Color(0xFFC02626),
     onEscalationCrimson = Color(0xFFFFFFFF),
-    escalationCrimsonContainer = Color(0xFFFEE2E2),
-    onEscalationCrimsonContainer = Color(0xFF7F1D1D),
-    snoozeIndigo = Color(0xFF3730A3),
-    snoozeIndigoContainer = Color(0xFFE0E7FF),
-    onSnoozeIndigoContainer = Color(0xFF1E1B4B)
+    escalationCrimsonContainer = Color(0xFFFFE4E4),
+    onEscalationCrimsonContainer = Color(0xFF4A0A0A),
+    snoozeIndigo = Color(0xFF3B4CCA),
+    snoozeIndigoContainer = Color(0xFFE4E8FF),
+    onSnoozeIndigoContainer = Color(0xFF161E54)
 )
 
 val DarkSafetyColors = KinDoseSafetyColors(

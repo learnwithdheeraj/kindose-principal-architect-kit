@@ -10,7 +10,6 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
@@ -27,8 +26,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalDensity
@@ -48,6 +50,8 @@ import com.kindose.app.data.DefaultDataRepository
 import com.kindose.app.data.DoseWindowRecord
 import com.kindose.app.data.RepositorySnapshot
 import com.kindose.app.domain.*
+import com.kindose.app.ui.theme.GoogleSansDisplayFamily
+import com.kindose.app.ui.theme.GoogleSansMonoFamily
 import com.kindose.app.ui.theme.KinDoseTheme
 import com.kindose.app.ui.theme.KinDoseThemeTokens
 
@@ -64,7 +68,7 @@ fun MainScreen(
             Box(
                 modifier = modifier
                     .fillMaxSize()
-                    .semantics { liveRegion = LiveRegionMode.Polite; contentDescription = "Loading KinDose Medication Safety Engine" },
+                    .semantics { liveRegion = LiveRegionMode.Polite; contentDescription = "Loading KinDose" },
                 contentAlignment = Alignment.Center
             ) {
                 CircularProgressIndicator()
@@ -90,7 +94,7 @@ fun MainScreen(
                 if (state.controls.seniorLargeVisionBoost) {
                     Density(
                         density = baseDensity.density,
-                        fontScale = (baseDensity.fontScale * 1.22f).coerceAtMost(1.65f)
+                        fontScale = (baseDensity.fontScale * 1.18f).coerceAtMost(1.55f)
                     )
                 } else {
                     baseDensity
@@ -146,7 +150,7 @@ internal fun KinDoseInteractiveScaffold(
         modifier = modifier.fillMaxSize(),
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
-            KinDoseTopHeader(
+            ExpressiveTopHeader(
                 snapshot = snapshot,
                 controls = controls,
                 onSwitchPersona = {
@@ -156,12 +160,11 @@ internal fun KinDoseInteractiveScaffold(
                 onToggleVisionBoost = {
                     haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                     onToggleVisionBoost()
-                },
-                onOpenLedger = { onToggleLedgerSheet(true) }
+                }
             )
         },
         bottomBar = {
-            SimulationControlDock(
+            FloatingScenarioPillBar(
                 activeRecord = snapshot.activeRecord,
                 onSimulateDuplicateTap = {
                     haptics.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -184,11 +187,11 @@ internal fun KinDoseInteractiveScaffold(
                 .fillMaxSize()
                 .padding(innerPadding)
                 .verticalScroll(scrollState)
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+                .padding(horizontal = 20.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
-            // Daily Schedule Pill Selector (8:00 AM, 1:00 PM, 8:00 PM)
-            DailyScheduleTimelineStrip(
+            // Expressive Pill Schedule Carousel (8:00 AM, 1:00 PM, 8:00 PM)
+            ExpressiveScheduleStrip(
                 windows = snapshot.windows,
                 activeWindowId = snapshot.activeWindowId,
                 onSelectWindow = {
@@ -197,25 +200,7 @@ internal fun KinDoseInteractiveScaffold(
                 }
             )
 
-            // Optional transient banner for simulation feedback
-            controls.lastStatusBanner?.let { banner ->
-                Surface(
-                    color = MaterialTheme.colorScheme.secondaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                    shape = MaterialTheme.shapes.small,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .semantics { liveRegion = LiveRegionMode.Polite }
-                ) {
-                    Text(
-                        text = banner,
-                        style = MaterialTheme.typography.labelLarge,
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
-                    )
-                }
-            }
-
-            // Main Persona Surface (Senior Appliance vs. Caregiver Command Center)
+            // Main Persona Surface (Senior Sanctuary vs. Family Caregiver Hub)
             AnimatedContent(
                 targetState = controls.activePersona,
                 transitionSpec = { fadeIn(spring(stiffness = Spring.StiffnessMediumLow)) togetherWith fadeOut() },
@@ -258,13 +243,7 @@ internal fun KinDoseInteractiveScaffold(
                 }
             }
 
-            // Accessibility & Engineering Rigor Footer Badge
-            AccessibilityAndArchitectureBadgeCard(
-                visionBoostEnabled = controls.seniorLargeVisionBoost,
-                auditCount = snapshot.auditLedger.size,
-                outboxCount = snapshot.outboxQueue.size,
-                onInspectLedger = { onToggleLedgerSheet(true) }
-            )
+            Spacer(modifier = Modifier.height(12.dp))
         }
     }
 
@@ -281,257 +260,133 @@ internal fun KinDoseInteractiveScaffold(
     }
 }
 
+/**
+ * Material 3 Expressive Editorial Header (Pixel Weather / Fitbit Inspired).
+ * Uses bundled Google Sans Display with warm tonal pill controls and zero visual clutter.
+ */
 @Composable
-private fun KinDoseTopHeader(
+private fun ExpressiveTopHeader(
     snapshot: RepositorySnapshot,
     controls: LocalUiControls,
     onSwitchPersona: (AppPersonaSurface) -> Unit,
-    onToggleVisionBoost: () -> Unit,
-    onOpenLedger: () -> Unit
+    onToggleVisionBoost: () -> Unit
 ) {
-    Surface(
-        color = MaterialTheme.colorScheme.surface,
-        tonalElevation = 2.dp,
-        shadowElevation = 2.dp
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.background)
+            .statusBarsPadding()
+            .padding(horizontal = 20.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .statusBarsPadding()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    // Medical Cross / Shield Emblem
-                    Box(
-                        modifier = Modifier
-                            .size(40.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(MaterialTheme.colorScheme.primary),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "K+",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.onPrimary,
-                            fontWeight = FontWeight.ExtraBold
-                        )
-                    }
-                    Column {
-                        Text(
-                            text = "KinDose Safety Engine",
-                            style = MaterialTheme.typography.titleLarge,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.semantics { heading() }
-                        )
-                        Text(
-                            text = "${snapshot.patientName} (${snapshot.patientAge}) · Doze-Exempt WAL Active",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-
-                // WCAG AAA High-Scale Vision Boost Toggle Button
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    FilterChip(
-                        selected = controls.seniorLargeVisionBoost,
-                        onClick = onToggleVisionBoost,
-                        label = {
-                            Text(
-                                text = if (controls.seniorLargeVisionBoost) "A11y AAA+" else "A11y AAA",
-                                style = MaterialTheme.typography.labelMedium
-                            )
-                        },
-                        modifier = Modifier.semantics {
-                            contentDescription = "Toggle Senior Low-Vision Large Typography Boost"
-                            stateDescription = if (controls.seniorLargeVisionBoost) "Large Font Enabled" else "Standard Font"
-                        }
-                    )
-                }
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    text = if (controls.activePersona == AppPersonaSurface.SENIOR_APPLIANCE) {
+                        "Good morning, Eleanor"
+                    } else {
+                        "Eleanor's Care Circle"
+                    },
+                    style = MaterialTheme.typography.headlineMedium,
+                    color = MaterialTheme.colorScheme.onBackground,
+                    modifier = Modifier.semantics { heading() }
+                )
+                Text(
+                    text = "Friday, Nov 6 · ${snapshot.activeRecord.spec.scheduledTimeLabel} Window",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
 
-            // Segmented Persona Switcher (Senior Appliance vs Caregiver Command Center)
+            // Sleek Pill Toggle for Low-Vision Scale Boost
             Surface(
-                color = MaterialTheme.colorScheme.surfaceVariant,
-                shape = RoundedCornerShape(16.dp),
-                modifier = Modifier.fillMaxWidth()
+                onClick = onToggleVisionBoost,
+                shape = CircleShape,
+                color = if (controls.seniorLargeVisionBoost) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.surfaceVariant
+                },
+                modifier = Modifier
+                    .height(40.dp)
+                    .semantics {
+                        contentDescription = "Toggle Large Text Accessibility Mode"
+                        stateDescription = if (controls.seniorLargeVisionBoost) "Enabled" else "Standard"
+                    }
             ) {
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(4.dp),
+                    modifier = Modifier.padding(horizontal = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    AppPersonaSurface.entries.forEach { persona ->
-                        val isSelected = controls.activePersona == persona
-                        val bgColor by animateColorAsState(
-                            targetValue = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
-                            label = "PersonaTabBg"
-                        )
-                        val contentColor by animateColorAsState(
-                            targetValue = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                            label = "PersonaTabFg"
-                        )
-
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .heightIn(min = 48.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(bgColor)
-                                .clickable(
-                                    role = Role.Tab,
-                                    onClickLabel = "Switch to ${persona.title}"
-                                ) { onSwitchPersona(persona) }
-                                .semantics {
-                                    selected = isSelected
-                                    contentDescription = "${persona.title}: ${persona.subtitle}"
-                                }
-                                .padding(vertical = 8.dp, horizontal = 10.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text(
-                                    text = persona.title,
-                                    style = MaterialTheme.typography.labelLarge,
-                                    color = contentColor
-                                )
-                                Text(
-                                    text = persona.subtitle,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = contentColor.copy(alpha = 0.85f),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
+                    Text(
+                        text = if (controls.seniorLargeVisionBoost) "Aa+" else "Aa",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontFamily = GoogleSansDisplayFamily,
+                        fontWeight = FontWeight.Bold,
+                        color = if (controls.seniorLargeVisionBoost) {
+                            MaterialTheme.colorScheme.onPrimary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
                         }
-                    }
+                    )
                 }
             }
         }
-    }
-}
 
-@Composable
-private fun DailyScheduleTimelineStrip(
-    windows: List<DoseWindowRecord>,
-    activeWindowId: DoseWindowId,
-    onSelectWindow: (DoseWindowId) -> Unit
-) {
-    val safetyColors = KinDoseThemeTokens.safetyColors
-
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(
-            text = "TODAY'S MEDICATION WINDOWS",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.semantics { heading() }
-        )
-
-        LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        // Expressive Pill Mode Switcher (Eleanor's Screen vs. Family Caregiver)
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceVariant,
+            shape = CircleShape,
             modifier = Modifier.fillMaxWidth()
         ) {
-            items(windows, key = { it.spec.doseWindowId.value }) { item ->
-                val isSelected = item.spec.doseWindowId == activeWindowId
-                val (badgeText, badgeBg, badgeFg) = when (item.state) {
-                    is DoseState.Confirmed -> Triple(
-                        "TAKEN",
-                        safetyColors.safeEmeraldContainer,
-                        safetyColors.onSafeEmeraldContainer
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                val tabs = listOf(
+                    AppPersonaSurface.SENIOR_APPLIANCE to "Eleanor's View",
+                    AppPersonaSurface.CAREGIVER_COMMAND to "Family Caregiver"
+                )
+                tabs.forEach { (persona, label) ->
+                    val isSelected = controls.activePersona == persona
+                    val bgColor by animateColorAsState(
+                        targetValue = if (isSelected) MaterialTheme.colorScheme.surface else Color.Transparent,
+                        label = "TabBg"
                     )
-                    is DoseState.Escalated -> Triple(
-                        "ESCALATED",
-                        safetyColors.escalationCrimsonContainer,
-                        safetyColors.onEscalationCrimsonContainer
+                    val fgColor by animateColorAsState(
+                        targetValue = if (isSelected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                        label = "TabFg"
                     )
-                    is DoseState.Snoozed -> Triple(
-                        "SNOOZED",
-                        safetyColors.snoozeIndigoContainer,
-                        safetyColors.onSnoozeIndigoContainer
-                    )
-                    is DoseState.Due -> Triple(
-                        "DUE NOW",
-                        MaterialTheme.colorScheme.primaryContainer,
-                        MaterialTheme.colorScheme.onPrimaryContainer
-                    )
-                    is DoseState.ResolvedByCaregiver -> Triple(
-                        "CAREGIVER OK",
-                        safetyColors.safeEmeraldContainer,
-                        safetyColors.onSafeEmeraldContainer
-                    )
-                    is DoseState.Scheduled -> Triple(
-                        "UPCOMING",
-                        MaterialTheme.colorScheme.surfaceVariant,
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    is DoseState.MissedExpired -> Triple(
-                        "EXPIRED",
-                        safetyColors.escalationCrimsonContainer,
-                        safetyColors.onEscalationCrimsonContainer
-                    )
-                }
 
-                Surface(
-                    shape = MaterialTheme.shapes.medium,
-                    color = if (isSelected) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
-                    border = BorderStroke(
-                        width = if (isSelected) 2.5.dp else 1.dp,
-                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
-                    ),
-                    shadowElevation = if (isSelected) 4.dp else 0.dp,
-                    modifier = Modifier
-                        .widthIn(min = 152.dp)
-                        .heightIn(min = 64.dp)
-                        .clip(MaterialTheme.shapes.medium)
-                        .clickable(role = Role.Button) { onSelectWindow(item.spec.doseWindowId) }
-                        .semantics(mergeDescendants = true) {
-                            selected = isSelected
-                            contentDescription = "${item.spec.scheduledTimeLabel}, ${item.spec.medicationName} ${item.spec.strengthLabel}, Status: $badgeText"
-                        }
-                ) {
-                    Column(
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Text(
-                                text = item.spec.scheduledTimeLabel,
-                                style = MaterialTheme.typography.titleMedium,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Surface(
-                                color = badgeBg,
-                                shape = RoundedCornerShape(6.dp)
-                            ) {
-                                Text(
-                                    text = badgeText,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = badgeFg,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                )
+                    Surface(
+                        onClick = { onSwitchPersona(persona) },
+                        shape = CircleShape,
+                        color = bgColor,
+                        shadowElevation = if (isSelected) 2.dp else 0.dp,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(44.dp)
+                            .semantics {
+                                role = Role.Tab
+                                selected = isSelected
+                                contentDescription = label
                             }
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text(
+                                text = label,
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                color = fgColor
+                            )
                         }
-                        Text(
-                            text = "${item.spec.medicationName} ${item.spec.strengthLabel}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
                     }
                 }
             }
@@ -540,9 +395,95 @@ private fun DailyScheduleTimelineStrip(
 }
 
 /**
- * SENIOR APPLIANCE SURFACE:
- * Designed for zero-login, tremor-safe, low-vision senior clarity (WCAG 2.2 AAA).
- * Minimum interactive button height: 92.dp (nearly double the 48.dp Android requirement).
+ * Tactile Pill-Shaped Schedule Carousel with Zero Harsh Outlines.
+ */
+@Composable
+private fun ExpressiveScheduleStrip(
+    windows: List<DoseWindowRecord>,
+    activeWindowId: DoseWindowId,
+    onSelectWindow: (DoseWindowId) -> Unit
+) {
+    val safetyColors = KinDoseThemeTokens.safetyColors
+
+    LazyRow(
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        items(windows, key = { it.spec.doseWindowId.value }) { item ->
+            val isSelected = item.spec.doseWindowId == activeWindowId
+            val (statusLabel, dotColor) = when (item.state) {
+                is DoseState.Confirmed -> "Taken" to safetyColors.safeEmerald
+                is DoseState.Escalated -> "Alert Sent" to safetyColors.escalationCrimson
+                is DoseState.Snoozed -> "Snoozed" to safetyColors.snoozeIndigo
+                is DoseState.Due -> "Due Now" to MaterialTheme.colorScheme.primary
+                is DoseState.ResolvedByCaregiver -> "Verified" to safetyColors.safeEmerald
+                is DoseState.Scheduled -> "Upcoming" to MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
+                is DoseState.MissedExpired -> "Missed" to safetyColors.escalationCrimson
+            }
+
+            Surface(
+                onClick = { onSelectWindow(item.spec.doseWindowId) },
+                shape = RoundedCornerShape(24.dp),
+                color = if (isSelected) {
+                    MaterialTheme.colorScheme.primaryContainer
+                } else {
+                    MaterialTheme.colorScheme.surface
+                },
+                shadowElevation = if (isSelected) 2.dp else 0.dp,
+                modifier = Modifier
+                    .widthIn(min = 148.dp)
+                    .semantics(mergeDescendants = true) {
+                        selected = isSelected
+                        contentDescription = "${item.spec.scheduledTimeLabel}, ${item.spec.medicationName}, $statusLabel"
+                    }
+            ) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(dotColor)
+                        )
+                        Text(
+                            text = "${item.spec.scheduledTimeLabel} · $statusLabel",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = if (isSelected) {
+                                MaterialTheme.colorScheme.onPrimaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            }
+                        )
+                    }
+                    Text(
+                        text = item.spec.medicationName,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontFamily = GoogleSansDisplayFamily,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isSelected) {
+                            MaterialTheme.colorScheme.onPrimaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.onSurface
+                        },
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * SENIOR APPLIANCE HERO SURFACE:
+ * Material 3 Expressive Bento Layout with authentic Google Sans Display typography,
+ * sculptural pill artwork, and an unmistakable 92dp tactile confirmation pill button.
  */
 @Composable
 internal fun SeniorApplianceHeroSurface(
@@ -557,7 +498,6 @@ internal fun SeniorApplianceHeroSurface(
 
     when (state) {
         is DoseState.Confirmed -> {
-            // DOUBLE-DOSE LOCKOUT SHIELD SURFACE
             val isDuplicateTapAlert = record.duplicateTapWarningMinutes != null
             val containerColor = if (isDuplicateTapAlert) {
                 safetyColors.shieldAmberContainer
@@ -575,112 +515,153 @@ internal fun SeniorApplianceHeroSurface(
                 safetyColors.onSafeEmeraldContainer
             }
 
-            Card(
-                shape = MaterialTheme.shapes.extraLarge,
-                colors = CardDefaults.cardColors(containerColor = containerColor),
-                border = BorderStroke(3.dp, accentColor),
-                elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
+            Surface(
+                shape = RoundedCornerShape(36.dp),
+                color = containerColor,
                 modifier = Modifier
                     .fillMaxWidth()
                     .semantics {
                         liveRegion = LiveRegionMode.Assertive
                         contentDescription = if (isDuplicateTapAlert) {
-                            "Stop! Double-Dose Prevention Shield Active. You already took ${spec.medicationName} ${record.duplicateTapWarningMinutes} minutes ago. Do not take another pill."
+                            "Hold on! Double-Dose Shield Active. You already took ${spec.medicationName} ${record.duplicateTapWarningMinutes} minutes ago. Do not take another pill."
                         } else {
-                            "Confirmed safe. You took your ${spec.scheduledTimeLabel} ${spec.medicationName}. Double-Dose Lockout Shield is protecting you until the next window."
+                            "All done for ${spec.scheduledTimeLabel}. You took your ${spec.medicationName}."
                         }
                     }
             ) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(24.dp),
+                        .padding(26.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                    verticalArrangement = Arrangement.spacedBy(18.dp)
                 ) {
-                    // Giant Shield Emblem
+                    // Custom Vector Shield / Check Emblem
                     Surface(
                         shape = CircleShape,
                         color = accentColor,
-                        modifier = Modifier.size(76.dp)
+                        modifier = Modifier.size(80.dp)
                     ) {
                         Box(contentAlignment = Alignment.Center) {
-                            Text(
-                                text = if (isDuplicateTapAlert) "STOP" else "SAFE",
-                                style = MaterialTheme.typography.titleMedium,
-                                color = Color.White,
-                                fontWeight = FontWeight.ExtraBold
-                            )
+                            Canvas(modifier = Modifier.size(38.dp)) {
+                                if (isDuplicateTapAlert) {
+                                    // Exclamation / Shield Icon
+                                    drawLine(
+                                        color = Color.White,
+                                        start = Offset(size.width / 2f, size.height * 0.18f),
+                                        end = Offset(size.width / 2f, size.height * 0.58f),
+                                        strokeWidth = 9f,
+                                        cap = StrokeCap.Round
+                                    )
+                                    drawCircle(
+                                        color = Color.White,
+                                        radius = 5f,
+                                        center = Offset(size.width / 2f, size.height * 0.80f)
+                                    )
+                                } else {
+                                    // Bold Checkmark
+                                    val path = Path().apply {
+                                        moveTo(size.width * 0.20f, size.height * 0.52f)
+                                        lineTo(size.width * 0.42f, size.height * 0.74f)
+                                        lineTo(size.width * 0.82f, size.height * 0.28f)
+                                    }
+                                    drawPath(
+                                        path = path,
+                                        color = Color.White,
+                                        style = Stroke(width = 9f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+                                    )
+                                }
+                            }
                         }
                     }
 
                     if (isDuplicateTapAlert) {
                         Surface(
                             color = safetyColors.shieldAmber,
-                            shape = RoundedCornerShape(14.dp),
+                            shape = RoundedCornerShape(20.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text(
-                                text = "HOLD ON — DO NOT TAKE A SECOND PILL!\nYou already confirmed this dose ${record.duplicateTapWarningMinutes} minutes ago.",
-                                style = MaterialTheme.typography.titleMedium,
-                                color = safetyColors.onShieldAmber,
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier.padding(14.dp)
-                            )
+                            Column(
+                                modifier = Modifier.padding(horizontal = 18.dp, vertical = 14.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text(
+                                    text = "DO NOT TAKE A SECOND PILL",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = safetyColors.onShieldAmber,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "You already took ${spec.medicationName} ${record.duplicateTapWarningMinutes} minutes ago (at 8:02 AM).",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = safetyColors.onShieldAmber,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
                         }
                     }
 
-                    Text(
-                        text = "${spec.medicationName} ${spec.strengthLabel} Already Taken",
-                        style = MaterialTheme.typography.headlineLarge,
-                        color = onContainerColor,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.semantics { heading() }
-                    )
-
-                    Text(
-                        text = "Recorded for ${spec.scheduledTimeLabel} window · Family notified automatically.\nYou are all set for this medication.",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = onContainerColor,
-                        textAlign = TextAlign.Center
-                    )
-
-                    // Visual Pill Verification Summary
-                    PillIdentificationCard(spec = spec)
-
-                    // Test Duplicate Tap Button (Demonstrates how tapping again triggers the Amber Shield)
-                    OutlinedButton(
-                        onClick = onConfirmTap,
-                        shape = MaterialTheme.shapes.large,
-                        border = BorderStroke(2.dp, accentColor),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = 64.dp)
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         Text(
-                            text = "Tap Again to Test Double-Dose Lockout Shield",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = onContainerColor
+                            text = if (isDuplicateTapAlert) {
+                                "Double-Dose Shield Active"
+                            } else {
+                                "All Done for ${spec.scheduledTimeLabel}"
+                            },
+                            style = MaterialTheme.typography.displaySmall,
+                            color = onContainerColor,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.semantics { heading() }
                         )
+                        Text(
+                            text = "${spec.medicationName} (${spec.strengthLabel}) is complete · Maya has been notified.",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = onContainerColor.copy(alpha = 0.88f),
+                            textAlign = TextAlign.Center
+                        )
+                    }
+
+                    ExpressivePillBentoRow(spec = spec)
+
+                    if (!isDuplicateTapAlert) {
+                        Surface(
+                            onClick = onConfirmTap,
+                            shape = CircleShape,
+                            color = Color.White.copy(alpha = 0.65f),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 54.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 16.dp)) {
+                                Text(
+                                    text = "Tap again to see how Double-Dose Shield protects you",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = onContainerColor
+                                )
+                            }
+                        }
                     }
                 }
             }
         }
 
         is DoseState.ResolvedByCaregiver -> {
-            Card(
-                shape = MaterialTheme.shapes.extraLarge,
-                colors = CardDefaults.cardColors(containerColor = safetyColors.safeEmeraldContainer),
-                border = BorderStroke(2.5.dp, safetyColors.safeEmerald),
+            Surface(
+                shape = RoundedCornerShape(36.dp),
+                color = safetyColors.safeEmeraldContainer,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(
-                    modifier = Modifier.padding(24.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                    modifier = Modifier.padding(26.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
                     Text(
-                        text = "Checked In with ${state.caregiverName}",
-                        style = MaterialTheme.typography.headlineMedium,
+                        text = "Verified by ${state.caregiverName}",
+                        style = MaterialTheme.typography.displaySmall,
                         color = safetyColors.onSafeEmeraldContainer,
                         modifier = Modifier.semantics { heading() }
                     )
@@ -689,171 +670,194 @@ internal fun SeniorApplianceHeroSurface(
                         style = MaterialTheme.typography.bodyLarge,
                         color = safetyColors.onSafeEmeraldContainer
                     )
-                    PillIdentificationCard(spec = spec)
+                    ExpressivePillBentoRow(spec = spec)
                 }
             }
         }
 
         else -> {
-            // ACTIVE DOSE PROMPT (DUE, SNOOZED, ESCALATED, SCHEDULED)
+            // ACTIVE DOSE HERO CARD (Material 3 Expressive Bento)
             val isEscalated = state is DoseState.Escalated
             val isSnoozed = state is DoseState.Snoozed
 
-            Card(
-                shape = MaterialTheme.shapes.extraLarge,
-                colors = CardDefaults.cardColors(
-                    containerColor = if (isEscalated) {
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Surface(
+                    shape = RoundedCornerShape(36.dp),
+                    color = if (isEscalated) {
                         safetyColors.escalationCrimsonContainer
                     } else {
                         MaterialTheme.colorScheme.surface
-                    }
-                ),
-                border = BorderStroke(
-                    width = if (isEscalated) 3.dp else 2.dp,
-                    color = if (isEscalated) safetyColors.escalationCrimson else MaterialTheme.colorScheme.primary
-                ),
-                elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(22.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                    },
+                    shadowElevation = 2.dp,
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    // Status Header Pill
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Surface(
-                            color = when {
-                                isEscalated -> safetyColors.escalationCrimson
-                                isSnoozed -> safetyColors.snoozeIndigo
-                                else -> MaterialTheme.colorScheme.primary
-                            },
-                            shape = RoundedCornerShape(50)
-                        ) {
-                            Text(
-                                text = when {
-                                    isEscalated -> "OVERDUE · FAMILY ALERTED AT 8:30 AM"
-                                    isSnoozed -> "SNOOZED (${state.snoozeCount} OF ${spec.maxSnoozes} USED)"
-                                    else -> "TIME FOR YOUR ${spec.scheduledTimeLabel} PILL"
-                                },
-                                style = MaterialTheme.typography.labelLarge,
-                                color = Color.White,
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
-                            )
-                        }
-                    }
-
-                    // Giant Medication Title & Purpose
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(
-                            text = "${spec.medicationName} (${spec.strengthLabel})",
-                            style = MaterialTheme.typography.displaySmall,
-                            color = if (isEscalated) safetyColors.onEscalationCrimsonContainer else MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.semantics { heading() }
-                        )
-                        Text(
-                            text = spec.clinicalPurpose,
-                            style = MaterialTheme.typography.titleMedium,
-                            color = if (isEscalated) safetyColors.onEscalationCrimsonContainer else MaterialTheme.colorScheme.primary
-                        )
-                    }
-
-                    // Visual & Tactile Pill Identification Card (Non-Color-Alone A11y)
-                    PillIdentificationCard(spec = spec)
-
-                    // Plain-English Instructions Box
-                    Surface(
-                        color = MaterialTheme.colorScheme.surfaceVariant,
-                        shape = MaterialTheme.shapes.medium,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Text(
-                                text = spec.dosageInstructions,
-                                style = MaterialTheme.typography.titleLarge,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                text = spec.foodWarning,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-
-                    // GIANT TACTILE CONFIRMATION CTA (96.dp height for Senior Tremor & Low-Vision Accessibility)
-                    Button(
-                        onClick = onConfirmTap,
-                        shape = RoundedCornerShape(24.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = safetyColors.safeEmerald,
-                            contentColor = safetyColors.onSafeEmerald
-                        ),
-                        elevation = ButtonDefaults.buttonElevation(defaultElevation = 6.dp),
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .heightIn(min = 96.dp)
-                            .semantics {
-                                role = Role.Button
-                                contentDescription = "I took my ${spec.scheduledTimeLabel} ${spec.medicationName} ${spec.strengthLabel}. Tap once to confirm and activate double-dose safety shield."
-                            }
+                            .padding(24.dp),
+                        verticalArrangement = Arrangement.spacedBy(18.dp)
                     ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(4.dp),
-                            modifier = Modifier.padding(vertical = 8.dp)
+                        // Top Row: Warm Time Badge + Strength Pill
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
+                            Surface(
+                                color = when {
+                                    isEscalated -> safetyColors.escalationCrimson
+                                    isSnoozed -> safetyColors.snoozeIndigo
+                                    else -> MaterialTheme.colorScheme.primaryContainer
+                                },
+                                shape = CircleShape
+                            ) {
+                                Text(
+                                    text = when {
+                                        isEscalated -> "Overdue · Family Alerted"
+                                        isSnoozed -> "Snoozed (${state.snoozeCount} of ${spec.maxSnoozes})"
+                                        else -> "${spec.scheduledTimeLabel} Morning Dose"
+                                    },
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = if (isEscalated || isSnoozed) {
+                                        Color.White
+                                    } else {
+                                        MaterialTheme.colorScheme.onPrimaryContainer
+                                    },
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                                )
+                            }
+
+                            Surface(
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                shape = CircleShape
+                            ) {
+                                Text(
+                                    text = spec.strengthLabel,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontFamily = GoogleSansDisplayFamily,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
+                                )
+                            }
+                        }
+
+                        // Hero Medication Display Name (Google Sans Display Bold)
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text(
-                                text = "I TOOK MY ${spec.scheduledTimeLabel} PILL",
-                                style = MaterialTheme.typography.headlineSmall,
-                                fontWeight = FontWeight.ExtraBold,
-                                textAlign = TextAlign.Center
+                                text = spec.medicationName,
+                                style = MaterialTheme.typography.displayMedium,
+                                color = if (isEscalated) {
+                                    safetyColors.onEscalationCrimsonContainer
+                                } else {
+                                    MaterialTheme.colorScheme.onSurface
+                                },
+                                modifier = Modifier.semantics { heading() }
                             )
                             Text(
-                                text = if (isEscalated) {
-                                    "Tap once — sends instant All-Clear to Maya"
+                                text = spec.clinicalPurpose,
+                                style = MaterialTheme.typography.titleMedium,
+                                color = if (isEscalated) {
+                                    safetyColors.onEscalationCrimsonContainer.copy(alpha = 0.85f)
                                 } else {
-                                    "Tap once to confirm & lock Double-Dose Shield"
-                                },
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = safetyColors.onSafeEmerald.copy(alpha = 0.92f)
+                                    MaterialTheme.colorScheme.primary
+                                }
                             )
                         }
-                    }
 
-                    // Bounded Snooze Secondary Action (Hidden once Escalated)
-                    if (!isEscalated) {
-                        val usedSnoozes = (state as? DoseState.Snoozed)?.snoozeCount ?: 0
-                        val remainingSnoozes = (spec.maxSnoozes - usedSnoozes).coerceAtLeast(0)
-                        OutlinedButton(
-                            onClick = onSnoozeTap,
-                            enabled = remainingSnoozes > 0,
-                            shape = RoundedCornerShape(18.dp),
-                            border = BorderStroke(2.dp, MaterialTheme.colorScheme.outline),
+                        // 2-Column Tactile Bento Row: Visual Pill Identification + Water/Meal Instruction
+                        ExpressivePillBentoRow(spec = spec)
+
+                        // GIANT TACTILE CONFIRMATION PILL BUTTON (94.dp height, Expressive Squircle)
+                        Button(
+                            onClick = onConfirmTap,
+                            shape = RoundedCornerShape(30.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = safetyColors.safeEmerald,
+                                contentColor = safetyColors.onSafeEmerald
+                            ),
+                            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .heightIn(min = 64.dp)
+                                .heightIn(min = 94.dp)
                                 .semantics {
-                                    contentDescription = "Remind me in 10 minutes. $remainingSnoozes snoozes remaining before 8:30 AM caregiver escalation."
+                                    role = Role.Button
+                                    contentDescription = "I took my ${spec.scheduledTimeLabel} ${spec.medicationName} ${spec.strengthLabel}. Tap once to confirm."
                                 }
                         ) {
-                            Text(
-                                text = if (remainingSnoozes > 0) {
-                                    "Remind Me in 10 Mins ($remainingSnoozes left before 8:30 AM alert)"
-                                } else {
-                                    "Maximum Snoozes Reached (Caregiver Alert at 8:30 AM)"
-                                },
-                                style = MaterialTheme.typography.titleMedium,
-                                textAlign = TextAlign.Center
-                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(16.dp)
+                            ) {
+                                // Tactile White Circle Check Badge
+                                Surface(
+                                    shape = CircleShape,
+                                    color = Color.White.copy(alpha = 0.22f),
+                                    modifier = Modifier.size(54.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Canvas(modifier = Modifier.size(26.dp)) {
+                                            val path = Path().apply {
+                                                moveTo(size.width * 0.18f, size.height * 0.52f)
+                                                lineTo(size.width * 0.42f, size.height * 0.76f)
+                                                lineTo(size.width * 0.84f, size.height * 0.26f)
+                                            }
+                                            drawPath(
+                                                path = path,
+                                                color = Color.White,
+                                                style = Stroke(width = 7f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+                                            )
+                                        }
+                                    }
+                                }
+
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "I Took This Pill",
+                                        style = MaterialTheme.typography.headlineMedium,
+                                        fontFamily = GoogleSansDisplayFamily,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White
+                                    )
+                                    Text(
+                                        text = if (isEscalated) {
+                                            "Sends instant All-Clear to Maya"
+                                        } else {
+                                            "Confirm ${spec.scheduledTimeLabel} dose & lock safety shield"
+                                        },
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = Color.White.copy(alpha = 0.9f)
+                                    )
+                                }
+                            }
+                        }
+
+                        // Soft Tonal Snooze Pill Button
+                        if (!isEscalated) {
+                            val usedSnoozes = (state as? DoseState.Snoozed)?.snoozeCount ?: 0
+                            val remainingSnoozes = (spec.maxSnoozes - usedSnoozes).coerceAtLeast(0)
+                            FilledTonalButton(
+                                onClick = onSnoozeTap,
+                                enabled = remainingSnoozes > 0,
+                                shape = RoundedCornerShape(22.dp),
+                                colors = ButtonDefaults.filledTonalButtonColors(
+                                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                ),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = 58.dp)
+                            ) {
+                                Text(
+                                    text = if (remainingSnoozes > 0) {
+                                        "Remind me in 10 minutes ($remainingSnoozes left)"
+                                    } else {
+                                        "Max snoozes used · Caregiver alert at 8:30 AM"
+                                    },
+                                    style = MaterialTheme.typography.titleMedium
+                                )
+                            }
                         }
                     }
                 }
@@ -863,114 +867,181 @@ internal fun SeniorApplianceHeroSurface(
 }
 
 /**
- * Custom Vector/Canvas Pill Visual Identifier Card.
- * Satisfies WCAG 1.4.1 (Use of Color) by combining shape geometry, imprint code text, and color description.
+ * 2-Tile Expressive Bento Row for Pill Appearance & Dosage Guidance.
  */
 @Composable
-private fun PillIdentificationCard(spec: DoseScheduleSpec) {
-    Surface(
-        color = MaterialTheme.colorScheme.surface,
-        shape = MaterialTheme.shapes.medium,
-        border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.outlineVariant),
+private fun ExpressivePillBentoRow(spec: DoseScheduleSpec) {
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .semantics(mergeDescendants = true) {
-                contentDescription = "Visual Pill Check: ${spec.pillColorLabel}, shape is ${spec.pillShape.a11yDescription}, stamped with imprint code ${spec.imprintCode}"
-            }
+            .height(IntrinsicSize.Min),
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Row(
+        // Left Bento Tile: Sculptural Pill Visual Check
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
+            shape = RoundedCornerShape(24.dp),
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(16.dp)
+                .weight(1f)
+                .fillMaxHeight()
+                .semantics(mergeDescendants = true) {
+                    contentDescription = "Pill visual check: ${spec.pillColorLabel}, ${spec.pillShape.a11yDescription}, stamped ${spec.imprintCode}"
+                }
         ) {
-            // Custom Canvas Pill Illustration
-            Canvas(
-                modifier = Modifier
-                    .size(56.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant)
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                val cx = size.width / 2f
-                val cy = size.height / 2f
-                when (spec.pillShape) {
-                    PillShape.ROUND_TABLET -> {
-                        drawCircle(
-                            color = Color(0xFFF48FB1),
-                            radius = size.minDimension * 0.34f,
-                            center = Offset(cx, cy)
-                        )
-                        drawCircle(
-                            color = Color(0xFF880E4F),
-                            radius = size.minDimension * 0.34f,
-                            center = Offset(cx, cy),
-                            style = Stroke(width = 4f)
-                        )
-                        // Score line across middle
-                        drawLine(
-                            color = Color(0xFF880E4F),
-                            start = Offset(cx - size.minDimension * 0.25f, cy),
-                            end = Offset(cx + size.minDimension * 0.25f, cy),
-                            strokeWidth = 3f,
-                            cap = StrokeCap.Round
-                        )
-                    }
-
-                    PillShape.OVAL_CAPLET -> {
-                        val w = size.width * 0.72f
-                        val h = size.height * 0.42f
-                        drawRoundRect(
-                            color = Color(0xFFFFD54F),
-                            topLeft = Offset(cx - w / 2f, cy - h / 2f),
-                            size = Size(w, h),
-                            cornerRadius = CornerRadius(h / 2f, h / 2f)
-                        )
-                        drawRoundRect(
-                            color = Color(0xFFF57F17),
-                            topLeft = Offset(cx - w / 2f, cy - h / 2f),
-                            size = Size(w, h),
-                            cornerRadius = CornerRadius(h / 2f, h / 2f),
-                            style = Stroke(width = 4f)
-                        )
-                    }
-
-                    PillShape.TWO_TONE_CAPSULE -> {
-                        val w = size.width * 0.74f
-                        val h = size.height * 0.38f
-                        drawRoundRect(
-                            color = Color(0xFF42A5F5),
-                            topLeft = Offset(cx - w / 2f, cy - h / 2f),
-                            size = Size(w, h),
-                            cornerRadius = CornerRadius(h / 2f, h / 2f)
-                        )
-                        drawRoundRect(
-                            color = Color(0xFF1565C0),
-                            topLeft = Offset(cx - w / 2f, cy - h / 2f),
-                            size = Size(w, h),
-                            cornerRadius = CornerRadius(h / 2f, h / 2f),
-                            style = Stroke(width = 4f)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    SculpturalPillCanvas(pillShape = spec.pillShape, modifier = Modifier.size(48.dp))
+                    Surface(
+                        color = MaterialTheme.colorScheme.surface,
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text(
+                            text = spec.imprintCode,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontFamily = GoogleSansMonoFamily,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            softWrap = false,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                         )
                     }
                 }
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = spec.pillColorLabel,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = spec.pillShape.displayName,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+
+        // Right Bento Tile: How to Take (Water & Food Guidance)
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
+            shape = RoundedCornerShape(24.dp),
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxHeight()
+                .semantics(mergeDescendants = true) {}
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                // Custom Vector Water Glass / Droplet Emblem
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.tertiaryContainer,
+                    modifier = Modifier.size(48.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Canvas(modifier = Modifier.size(22.dp)) {
+                            val drop = Path().apply {
+                                moveTo(size.width / 2f, size.height * 0.10f)
+                                cubicTo(
+                                    size.width * 0.88f, size.height * 0.50f,
+                                    size.width * 0.85f, size.height * 0.88f,
+                                    size.width / 2f, size.height * 0.90f
+                                )
+                                cubicTo(
+                                    size.width * 0.15f, size.height * 0.88f,
+                                    size.width * 0.12f, size.height * 0.50f,
+                                    size.width / 2f, size.height * 0.10f
+                                )
+                                close()
+                            }
+                            drawPath(drop, color = Color(0xFF1D4ED8))
+                        }
+                    }
+                }
+
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = "1 Tablet · Full Water",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = spec.foodWarning,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SculpturalPillCanvas(
+    pillShape: PillShape,
+    modifier: Modifier = Modifier
+) {
+    Canvas(
+        modifier = modifier
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.surface)
+    ) {
+        val cx = size.width / 2f
+        val cy = size.height / 2f
+        when (pillShape) {
+            PillShape.ROUND_TABLET -> {
+                val r = size.minDimension * 0.34f
+                drawCircle(
+                    brush = Brush.linearGradient(
+                        colors = listOf(Color(0xFFFFB2C9), Color(0xFFEC407A))
+                    ),
+                    radius = r,
+                    center = Offset(cx, cy)
+                )
+                drawLine(
+                    color = Color.White.copy(alpha = 0.75f),
+                    start = Offset(cx - r * 0.72f, cy),
+                    end = Offset(cx + r * 0.72f, cy),
+                    strokeWidth = 3.5f,
+                    cap = StrokeCap.Round
+                )
             }
 
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(
-                    text = "PILL VISUAL CHECK · ${spec.pillShape.displayName.uppercase()}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.Bold
+            PillShape.OVAL_CAPLET -> {
+                val w = size.width * 0.70f
+                val h = size.height * 0.40f
+                drawRoundRect(
+                    brush = Brush.linearGradient(
+                        colors = listOf(Color(0xFFFFE082), Color(0xFFFFB300))
+                    ),
+                    topLeft = Offset(cx - w / 2f, cy - h / 2f),
+                    size = Size(w, h),
+                    cornerRadius = CornerRadius(h / 2f, h / 2f)
                 )
-                Text(
-                    text = spec.pillColorLabel,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Text(
-                    text = "Imprint stamped on pill: \"${spec.imprintCode}\"",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+            }
+
+            PillShape.TWO_TONE_CAPSULE -> {
+                val w = size.width * 0.72f
+                val h = size.height * 0.38f
+                drawRoundRect(
+                    brush = Brush.horizontalGradient(
+                        colors = listOf(Color(0xFF42A5F5), Color(0xFFE3F2FD))
+                    ),
+                    topLeft = Offset(cx - w / 2f, cy - h / 2f),
+                    size = Size(w, h),
+                    cornerRadius = CornerRadius(h / 2f, h / 2f)
                 )
             }
         }
@@ -979,8 +1050,8 @@ private fun PillIdentificationCard(spec: DoseScheduleSpec) {
 
 /**
  * FAMILY CAREGIVER COMMAND CENTER SURFACE:
- * Gives the adult child / caregiver immediate visibility into adherence, active escalations,
- * one-tap phone verification resolution, and the SQLite Transactional Outbox ledger.
+ * Fitbit / Google Health Bento Dashboard with Circular Adherence Ring,
+ * Escalation Resolution Card, and Multi-Provider CredentialManager Sync Vault.
  */
 @Composable
 internal fun CaregiverCommandCenterSurface(
@@ -995,35 +1066,48 @@ internal fun CaregiverCommandCenterSurface(
     val state = activeRecord.state
 
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        // 1. Live Escalation Banner if any window is ESCALATED
+        // 1. Live Escalation Card (When 8:30 AM Grace Period Expires)
         if (state is DoseState.Escalated) {
-            Card(
-                shape = MaterialTheme.shapes.large,
-                colors = CardDefaults.cardColors(containerColor = safetyColors.escalationCrimsonContainer),
-                border = BorderStroke(2.5.dp, safetyColors.escalationCrimson),
+            Surface(
+                shape = RoundedCornerShape(32.dp),
+                color = safetyColors.escalationCrimsonContainer,
                 modifier = Modifier
                     .fillMaxWidth()
                     .semantics { liveRegion = LiveRegionMode.Assertive }
             ) {
                 Column(
-                    modifier = Modifier.padding(20.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                    modifier = Modifier.padding(22.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(12.dp)
+                                .clip(CircleShape)
+                                .background(safetyColors.escalationCrimson)
+                        )
+                        Text(
+                            text = "NEEDS CHECK-IN · 8:30 AM GRACE EXPIRED",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = safetyColors.escalationCrimson,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
                     Text(
-                        text = "ACTION NEEDED · GRACE DEADLINE EXPIRED",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = safetyColors.escalationCrimson
-                    )
-                    Text(
-                        text = "${snapshot.patientName} has not confirmed her ${activeRecord.spec.scheduledTimeLabel} ${activeRecord.spec.medicationName} (${activeRecord.spec.strengthLabel}).",
-                        style = MaterialTheme.typography.headlineSmall,
+                        text = "${snapshot.patientName} hasn't tapped her ${activeRecord.spec.scheduledTimeLabel} ${activeRecord.spec.medicationName} yet.",
+                        style = MaterialTheme.typography.headlineMedium,
                         color = safetyColors.onEscalationCrimsonContainer,
                         modifier = Modifier.semantics { heading() }
                     )
+
                     Text(
-                        text = "Prior snoozes used: ${state.snoozeCountPrior} · Senior phone heartbeat: Online (84% Battery)",
+                        text = "Phone is online (84% battery) · ${state.snoozeCountPrior} snoozes used.",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = safetyColors.onEscalationCrimsonContainer
+                        color = safetyColors.onEscalationCrimsonContainer.copy(alpha = 0.85f)
                     )
 
                     Button(
@@ -1034,13 +1118,13 @@ internal fun CaregiverCommandCenterSurface(
                             containerColor = safetyColors.escalationCrimson,
                             contentColor = safetyColors.onEscalationCrimson
                         ),
-                        shape = MaterialTheme.shapes.medium,
+                        shape = RoundedCornerShape(20.dp),
                         modifier = Modifier
                             .fillMaxWidth()
                             .heightIn(min = 60.dp)
                     ) {
                         Text(
-                            text = "I Called Mom & Verified — Mark Dose Safe",
+                            text = "I Called Mom — Mark Dose Safe",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold
                         )
@@ -1049,92 +1133,103 @@ internal fun CaregiverCommandCenterSurface(
             }
         }
 
-        // 2. Adherence & Telemetry Summary Card
-        Card(
-            shape = MaterialTheme.shapes.large,
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        // 2. Hero Adherence Ring & Live Device Health Bento Card
+        Surface(
+            shape = RoundedCornerShape(32.dp),
+            color = MaterialTheme.colorScheme.surface,
+            shadowElevation = 1.dp,
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(
-                modifier = Modifier.padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                modifier = Modifier.padding(22.dp),
+                verticalArrangement = Arrangement.spacedBy(18.dp)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(20.dp)
                 ) {
-                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                    // Custom Circular Adherence Ring (98%)
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier.size(96.dp)
+                    ) {
+                        val trackColor = MaterialTheme.colorScheme.surfaceVariant
+                        val progressColor = safetyColors.safeEmerald
+                        Canvas(modifier = Modifier.fillMaxSize()) {
+                            val stroke = 10.dp.toPx()
+                            drawArc(
+                                color = trackColor,
+                                startAngle = 0f,
+                                sweepAngle = 360f,
+                                useCenter = false,
+                                style = Stroke(width = stroke, cap = StrokeCap.Round)
+                            )
+                            drawArc(
+                                color = progressColor,
+                                startAngle = -90f,
+                                sweepAngle = 360f * (snapshot.thirtyDayAdherencePercent / 100f),
+                                useCenter = false,
+                                style = Stroke(width = stroke, cap = StrokeCap.Round)
+                            )
+                        }
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = "${snapshot.thirtyDayAdherencePercent}%",
+                                style = MaterialTheme.typography.headlineSmall,
+                                fontFamily = GoogleSansDisplayFamily,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "30-Day",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
                         Text(
-                            text = "${snapshot.patientName}'s Safety Telemetry",
-                            style = MaterialTheme.typography.titleLarge,
+                            text = "${snapshot.adherenceStreakDays}-Day Safe Streak",
+                            style = MaterialTheme.typography.headlineSmall,
                             color = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.semantics { heading() }
                         )
                         Text(
-                            text = "Monitored by ${snapshot.caregiverName} · End-to-End Idempotent Sync",
-                            style = MaterialTheme.typography.bodySmall,
+                            text = "Monitored by ${snapshot.caregiverName} · Zero accidental double-doses.",
+                            style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                    }
-
-                    Surface(
-                        color = safetyColors.safeEmeraldContainer,
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Text(
-                            text = "${snapshot.thirtyDayAdherencePercent}% 30-Day",
-                            style = MaterialTheme.typography.labelLarge,
-                            color = safetyColors.onSafeEmeraldContainer,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                        )
-                    }
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    MetricTile(
-                        label = "Current Streak",
-                        value = "${snapshot.adherenceStreakDays} Days",
-                        subtext = "Zero missed critical meds",
-                        modifier = Modifier.weight(1f)
-                    )
-                    MetricTile(
-                        label = "Senior Device",
-                        value = "84% Battery",
-                        subtext = "AlarmClock Doze-Exempt",
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-
-                // QuickCaregiver Override for Due/Snoozed states too
-                if (state is DoseState.Due || state is DoseState.Snoozed) {
-                    OutlinedButton(
-                        onClick = {
-                            onResolveTap("Verified with Mom by phone — marking ${activeRecord.spec.medicationName} resolved.")
-                        },
-                        shape = MaterialTheme.shapes.medium,
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)
-                    ) {
-                        Text("Log Caregiver Phone Check-In for ${activeRecord.spec.medicationName}")
+                        Surface(
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            shape = CircleShape
+                        ) {
+                            Text(
+                                text = "Mom's Pixel · 84% Battery · Online",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                            )
+                        }
                     }
                 }
             }
         }
 
-        // 2B. Multi-Provider CredentialManager & Zero-Loss Device Restore Card
-        Card(
-            shape = MaterialTheme.shapes.large,
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        // 3. Multi-Provider CredentialManager & Zero-Loss Device Restore Bento Card
+        Surface(
+            shape = RoundedCornerShape(32.dp),
+            color = MaterialTheme.colorScheme.surface,
+            shadowElevation = 1.dp,
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(
-                modifier = Modifier.padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                modifier = Modifier.padding(22.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1143,36 +1238,30 @@ internal fun CaregiverCommandCenterSurface(
                 ) {
                     Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
                         Text(
-                            text = "Identity & Multi-Device Sync Vault",
+                            text = "Cloud Sync & Device Backup",
                             style = MaterialTheme.typography.titleLarge,
                             color = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.semantics { heading() }
                         )
                         Text(
-                            text = "Vault ID: ${snapshot.cloudVault.familyVaultId} · ${snapshot.cloudVault.currentDeviceModel}",
+                            text = "${snapshot.cloudVault.primaryEmail} · ${snapshot.cloudVault.currentDeviceModel}",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                     Surface(
-                        color = MaterialTheme.colorScheme.primaryContainer,
-                        shape = RoundedCornerShape(10.dp)
+                        color = safetyColors.safeEmeraldContainer,
+                        shape = CircleShape
                     ) {
                         Text(
-                            text = "BlockStore Ready",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            text = "Synced",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = safetyColors.onSafeEmeraldContainer,
                             fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
                         )
                     }
                 }
-
-                Text(
-                    text = "Linked Login Providers (Tap to test CredentialManager identity switch):",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
 
                 LazyRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1183,9 +1272,10 @@ internal fun CaregiverCommandCenterSurface(
                         FilterChip(
                             selected = isActive,
                             onClick = { onSwitchIdentityProvider(provider) },
+                            shape = CircleShape,
                             label = {
                                 Text(
-                                    text = "${provider.displayName} (${provider.protocolBadge})",
+                                    text = provider.displayName,
                                     style = MaterialTheme.typography.labelMedium
                                 )
                             }
@@ -1193,246 +1283,122 @@ internal fun CaregiverCommandCenterSurface(
                     }
                 }
 
-                FilledTonalButton(
-                    onClick = onSimulateNewPhoneRestore,
-                    shape = MaterialTheme.shapes.medium,
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)
-                ) {
-                    Text(
-                        text = "Simulate Switching to Brand-New Phone (Zero-Loss Restore)",
-                        style = MaterialTheme.typography.labelLarge
-                    )
-                }
-            }
-        }
-
-        // 3. Recent Immutable Audit & Outbox Feed Preview
-        Card(
-            shape = MaterialTheme.shapes.large,
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(
-                modifier = Modifier.padding(18.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Text(
-                        text = "LIVE TRANSACTIONAL OUTBOX & AUDIT LOG",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.semantics { heading() }
-                    )
-                    TextButton(onClick = onOpenAuditLedger) {
-                        Text("Full Ledger (${snapshot.auditLedger.size})")
-                    }
-                }
-
-                snapshot.auditLedger.take(3).forEach { entry ->
-                    Surface(
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                        shape = MaterialTheme.shapes.small,
-                        modifier = Modifier.fillMaxWidth()
+                    FilledTonalButton(
+                        onClick = onSimulateNewPhoneRestore,
+                        shape = RoundedCornerShape(18.dp),
+                        modifier = Modifier.weight(1f).heightIn(min = 50.dp)
                     ) {
-                        Column(
-                            modifier = Modifier.padding(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(3.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text(
-                                    text = "${entry.medicationName} · ${entry.fromState} -> ${entry.toState}",
-                                    style = MaterialTheme.typography.labelLarge,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Text(
-                                    text = entry.formattedTime,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            Text(
-                                text = entry.detail,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
+                        Text(
+                            text = "Test New Phone Restore",
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                    }
+                    OutlinedButton(
+                        onClick = onOpenAuditLedger,
+                        shape = RoundedCornerShape(18.dp),
+                        modifier = Modifier.heightIn(min = 50.dp)
+                    ) {
+                        Text(
+                            text = "Audit Log (${snapshot.auditLedger.size})",
+                            style = MaterialTheme.typography.labelLarge
+                        )
                     }
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun MetricTile(
-    label: String,
-    value: String,
-    subtext: String,
-    modifier: Modifier = Modifier
-) {
-    Surface(
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        shape = MaterialTheme.shapes.medium,
-        modifier = modifier.semantics(mergeDescendants = true) {}
-    ) {
-        Column(
-            modifier = Modifier.padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                text = value,
-                style = MaterialTheme.typography.headlineSmall,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            Text(
-                text = subtext,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-    }
-}
-
-@Composable
-private fun AccessibilityAndArchitectureBadgeCard(
-    visionBoostEnabled: Boolean,
-    auditCount: Int,
-    outboxCount: Int,
-    onInspectLedger: () -> Unit
-) {
-    Surface(
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
-        shape = MaterialTheme.shapes.medium,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(role = Role.Button) { onInspectLedger() }
-    ) {
-        Row(
-            modifier = Modifier.padding(14.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(2.dp)
-            ) {
-                Text(
-                    text = "Principal Architecture & WCAG 2.2 AAA Verified",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Text(
-                    text = "Google Sans Flex · 96dp Touch Targets · Audit ($auditCount) · Outbox ($outboxCount)",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            Text(
-                text = "Inspect ->",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary
-            )
         }
     }
 }
 
 /**
- * Interactive Simulation Dock at the bottom of the screen so the user can test every
- * Principal-grade safety invariant with one tap.
+ * Sleek Floating Pill Dock at the bottom for one-tap interactive scenario testing.
  */
 @Composable
-private fun SimulationControlDock(
+private fun FloatingScenarioPillBar(
     activeRecord: DoseWindowRecord,
     onSimulateDuplicateTap: () -> Unit,
     onSimulateEscalation: () -> Unit,
     onResetScenario: () -> Unit,
     onOpenLedger: () -> Unit
 ) {
-    Surface(
-        color = MaterialTheme.colorScheme.surface,
-        tonalElevation = 6.dp,
-        shadowElevation = 8.dp,
-        modifier = Modifier.fillMaxWidth()
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        contentAlignment = Alignment.Center
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .navigationBarsPadding()
-                .padding(horizontal = 14.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+        Surface(
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 4.dp,
+            shadowElevation = 6.dp
         ) {
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = "SCENARIO SIMULATOR (${activeRecord.spec.medicationName.uppercase()})",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = "State: ${activeRecord.state.stateName}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
+                Surface(
+                    onClick = onResetScenario,
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.surfaceVariant
+                ) {
+                    Text(
+                        text = "8 AM Due",
+                        style = MaterialTheme.typography.labelMedium,
+                        maxLines = 1,
+                        softWrap = false,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
+                    )
+                }
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                FilledTonalButton(
+                Surface(
                     onClick = onSimulateDuplicateTap,
-                    shape = MaterialTheme.shapes.small,
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
-                    modifier = Modifier.weight(1f).heightIn(min = 48.dp)
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primaryContainer
                 ) {
                     Text(
                         text = "2x Tap Shield",
                         style = MaterialTheme.typography.labelMedium,
-                        maxLines = 1
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        softWrap = false,
+                        modifier = Modifier.padding(horizontal = 13.dp, vertical = 10.dp)
                     )
                 }
 
-                FilledTonalButton(
+                Surface(
                     onClick = onSimulateEscalation,
-                    shape = MaterialTheme.shapes.small,
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
-                    modifier = Modifier.weight(1f).heightIn(min = 48.dp)
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.tertiaryContainer
                 ) {
                     Text(
-                        text = "8:30 Escalate",
+                        text = "8:30 Alert",
                         style = MaterialTheme.typography.labelMedium,
-                        maxLines = 1
+                        color = MaterialTheme.colorScheme.onTertiaryContainer,
+                        maxLines = 1,
+                        softWrap = false,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
                     )
                 }
 
-                OutlinedButton(
-                    onClick = onResetScenario,
-                    shape = MaterialTheme.shapes.small,
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
-                    modifier = Modifier.weight(0.85f).heightIn(min = 48.dp)
+                Surface(
+                    onClick = onOpenLedger,
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.surfaceVariant
                 ) {
                     Text(
-                        text = "Reset 8 AM",
+                        text = "Logs",
                         style = MaterialTheme.typography.labelMedium,
-                        maxLines = 1
+                        maxLines = 1,
+                        softWrap = false,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
                     )
                 }
             }
@@ -1468,61 +1434,22 @@ private fun TransactionalOutboxAndAuditSheetContent(
         }
 
         Text(
-            text = "Every state transition commits atomically alongside its idempotency key and outbox payload (Zero Dual-Write Bug).",
+            text = "Every state transition commits atomically alongside its idempotency key and outbox payload.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-
-        Text(
-            text = "TRANSACTIONAL OUTBOX QUEUE (${snapshot.outboxQueue.size})",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.primary
-        )
-
-        if (snapshot.outboxQueue.isEmpty()) {
-            Text(
-                text = "No outbox events queued yet — confirm or escalate a dose to inspect outbox records.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        } else {
-            snapshot.outboxQueue.forEach { item ->
-                Surface(
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    shape = MaterialTheme.shapes.small,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Text(
-                            text = "${item.outboxId} · ${item.eventType.displayLabel}",
-                            style = MaterialTheme.typography.labelLarge
-                        )
-                        Text(
-                            text = "IdempotencyKey: ${item.idempotencyKey.value} · ${item.deliveryStatus}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-            }
-        }
-
-        Text(
-            text = "IMMUTABLE STATE AUDIT LOG (${snapshot.auditLedger.size})",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.primary
         )
 
         snapshot.auditLedger.forEach { audit ->
             Surface(
                 color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                shape = MaterialTheme.shapes.small,
+                shape = RoundedCornerShape(16.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Column(modifier = Modifier.padding(12.dp)) {
+                Column(modifier = Modifier.padding(14.dp)) {
                     Text(
                         text = "[${audit.formattedTime}] ${audit.auditId}: ${audit.fromState} -> ${audit.toState}",
-                        style = MaterialTheme.typography.labelLarge
+                        style = MaterialTheme.typography.labelLarge,
+                        fontFamily = GoogleSansMonoFamily
                     )
                     Text(
                         text = audit.detail,
@@ -1567,10 +1494,7 @@ fun SeniorDoubleDoseShieldPreview() {
     KinDoseTheme(darkTheme = false) {
         KinDoseInteractiveScaffold(
             snapshot = repo.snapshot.value,
-            controls = LocalUiControls(
-                activePersona = AppPersonaSurface.SENIOR_APPLIANCE,
-                lastStatusBanner = "Simulated 2nd tap 18 mins later -> Double-Dose Lockout Shield activated!"
-            ),
+            controls = LocalUiControls(activePersona = AppPersonaSurface.SENIOR_APPLIANCE),
             onSwitchPersona = {},
             onToggleVisionBoost = {},
             onToggleLedgerSheet = {},
