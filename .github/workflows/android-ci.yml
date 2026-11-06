@@ -1,0 +1,39 @@
+name: KinDose Android CI & Release Build
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  verify-and-build:
+    name: Principal Invariant Verification & APK Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+          cache: 'gradle'
+
+      - name: Run 250,000-Transition Deterministic Simulation Fuzz Suite
+        run: java tests/KinDoseStateMachineSimulationTest.java
+
+      - name: Run Android Unit & ViewModel Invariant Tests
+        run: ./gradlew testDebugUnitTest --stacktrace
+
+      - name: Assemble Debug APK
+        run: ./gradlew assembleDebug --stacktrace
+
+      - name: Upload Installable KinDose APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kindose-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
