@@ -365,23 +365,28 @@ private fun ExpressiveTopHeader(
             ) {
                 Text(
                     text = if (controls.activePersona == AppPersonaSurface.SENIOR_APPLIANCE) {
-                        "Good morning, Eleanor"
+                        "Good morning, ${snapshot.patientName.substringBefore(" ")}"
                     } else {
-                        "Eleanor's Care Circle"
+                        "${snapshot.patientName.substringBefore(" ")}'s Care Circle"
                     },
-                    style = MaterialTheme.typography.headlineSmall,
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontFamily = GoogleSansDisplayFamily,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp,
+                        lineHeight = 23.sp
+                    ),
                     color = MaterialTheme.colorScheme.onBackground,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                    maxLines = 2,
                     modifier = Modifier.semantics { heading() }
                 )
                 Text(
                     text = if (vault.isSignedIn) {
-                        "Synced · ${vault.activeProvider.displayName} (${vault.primaryEmail})"
+                        "Synced · ${vault.accountDisplayName}"
                     } else {
-                        "Local Offline Mode · Tap Sign In to link cloud backup"
+                        "Offline Mode · Tap Sign In"
                     },
                     style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.Medium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -436,7 +441,11 @@ private fun ExpressiveTopHeader(
                             }
                         }
                         Text(
-                            text = if (vault.isSignedIn) "Account" else "Sign In",
+                            text = if (vault.isSignedIn) {
+                                vault.accountDisplayName.substringBefore(" ").take(10)
+                            } else {
+                                "Sign In"
+                            },
                             style = MaterialTheme.typography.labelLarge,
                             fontFamily = GoogleSansDisplayFamily,
                             fontWeight = FontWeight.Bold,
