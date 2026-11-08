@@ -33,6 +33,7 @@ data class LocalUiControls(
     val seniorLargeVisionBoost: Boolean = false,
     val showArchitectureLedgerSheet: Boolean = false,
     val showAccountSignInSheet: Boolean = false,
+    val showAddMedicationSheet: Boolean = false,
     val lastStatusBanner: String? = null
 )
 
@@ -82,6 +83,38 @@ class MainScreenViewModel(
 
     fun toggleAccountSignInSheet(show: Boolean) {
         localControls.update { it.copy(showAccountSignInSheet = show) }
+    }
+
+    fun toggleAddMedicationSheet(show: Boolean) {
+        localControls.update { it.copy(showAddMedicationSheet = show) }
+    }
+
+    fun onAddNewMedication(
+        medicationName: String,
+        strengthLabel: String,
+        scheduledTimeLabel: String,
+        clinicalPurpose: String,
+        foodWarning: String,
+        pillShape: PillShape,
+        pillColorLabel: String,
+        imprintCode: String
+    ) {
+        dataRepository.addNewMedicationSchedule(
+            medicationName = medicationName,
+            strengthLabel = strengthLabel,
+            scheduledTimeLabel = scheduledTimeLabel,
+            clinicalPurpose = clinicalPurpose,
+            foodWarning = foodWarning,
+            pillShape = pillShape,
+            pillColorLabel = pillColorLabel,
+            imprintCode = imprintCode
+        )
+        localControls.update {
+            it.copy(
+                showAddMedicationSheet = false,
+                lastStatusBanner = "Added $medicationName ($strengthLabel) at $scheduledTimeLabel & synced to Cloud Vault"
+            )
+        }
     }
 
     fun onSignInWithProvider(provider: IdentityProvider, email: String, displayName: String) {

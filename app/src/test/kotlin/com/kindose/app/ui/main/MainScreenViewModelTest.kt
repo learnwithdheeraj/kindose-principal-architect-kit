@@ -138,4 +138,28 @@ class MainScreenViewModelTest {
         assertEquals(3, snap.windows.size)
         assertEquals(14, snap.adherenceStreakDays)
     }
+
+    @Test
+    fun addNewMedication_insertsAndSelectsNewScheduleWindow() = runTest {
+        val repository = DefaultDataRepository()
+        val viewModel = MainScreenViewModel(repository)
+        backgroundScope.launch(testDispatcher) { viewModel.uiState.collect() }
+
+        viewModel.onAddNewMedication(
+            medicationName = "Metformin",
+            strengthLabel = "500 mg",
+            scheduledTimeLabel = "9:00 AM",
+            clinicalPurpose = "Blood Sugar Control",
+            foodWarning = "Take with breakfast",
+            pillShape = PillShape.ROUND_TABLET,
+            pillColorLabel = "White Round Tablet",
+            imprintCode = "GL 500"
+        )
+
+        val snap = (viewModel.uiState.value as MainScreenUiState.Success).snapshot
+        assertEquals(4, snap.windows.size)
+        assertEquals("Metformin", snap.activeRecord.spec.medicationName)
+        assertEquals("500 mg", snap.activeRecord.spec.strengthLabel)
+        assertTrue(snap.activeRecord.state is DoseState.Due)
+    }
 }

@@ -53,6 +53,16 @@ interface DataRepository {
     fun signOutAccount()
     fun simulateDeviceChangeRestore(newDeviceModel: String, viaProvider: IdentityProvider)
     fun simulateFcmPushEscalationTest()
+    fun addNewMedicationSchedule(
+        medicationName: String,
+        strengthLabel: String,
+        scheduledTimeLabel: String,
+        clinicalPurpose: String,
+        foodWarning: String,
+        pillShape: PillShape,
+        pillColorLabel: String,
+        imprintCode: String
+    ): DoseWindowId
 }
 
 /**
@@ -352,6 +362,73 @@ class DefaultDataRepository : DataRepository {
                 )
             )
         }
+    }
+
+    override fun addNewMedicationSchedule(
+        medicationName: String,
+        strengthLabel: String,
+        scheduledTimeLabel: String,
+        clinicalPurpose: String,
+        foodWarning: String,
+        pillShape: PillShape,
+        pillColorLabel: String,
+        imprintCode: String
+    ): DoseWindowId {
+        val cleanName = medicationName.trim().ifBlank { "Metformin" }
+        val cleanStrength = strengthLabel.trim().ifBlank { "500 mg" }
+        val cleanTime = scheduledTimeLabel.trim().ifBlank { "9:00 AM" }
+        val cleanPurpose = clinicalPurpose.trim().ifBlank { "Daily Prescribed Therapy" }
+        val cleanFood = foodWarning.trim().ifBlank { "Take with a full glass of water" }
+        val cleanColor = pillColorLabel.trim().ifBlank { "White Round Tablet" }
+        val cleanImprint = imprintCode.trim().ifBlank { "RX 100" }
+
+        val slug = cleanName.lowercase(Locale.US).replace(Regex("[^a-z0-9]+"), "-").trim('-')
+        val newWindowId = DoseWindowId("dose-2026-11-08-${System.nanoTime().toString().takeLast(5)}-$slug")
+
+        _snapshot.update { current ->
+            val dueEpoch = EpochMillis(BASE_0800_EPOCH_MS)
+            val newSpec = DoseScheduleSpec(
+                doseWindowId = newWindowId,
+                scheduleId = ScheduleId("sched-$slug-${sequenceCounter++}"),
+                patientId = PatientId("patient-eleanor-vance"),
+                scheduledTimeLabel = cleanTime,
+                medicationName = cleanName,
+                strengthLabel = cleanStrength,
+                clinicalPurpose = cleanPurpose,
+                dosageInstructions = "Take 1 dose by mouth with water",
+                foodWarning = cleanFood,
+                pillShape = pillShape,
+                pillColorLabel = cleanColor,
+                imprintCode = cleanImprint,
+                windowStart = EpochMillis(dueEpoch.millis - 15 * MIN_MS),
+                dueAt = dueEpoch,
+                escalationDeadline = EpochMillis(dueEpoch.millis + 30 * MIN_MS),
+                windowEnd = EpochMillis(dueEpoch.millis + 120 * MIN_MS),
+                maxSnoozes = 2
+            )
+            val newRecord = DoseWindowRecord(
+                spec = newSpec,
+                state = DoseState.Due(notifiedAt = dueEpoch)
+            )
+            val addAudit = AuditLogEntry(
+                auditId = "AUD-${1000 + sequenceCounter++}",
+                doseWindowId = newWindowId,
+                medicationName = cleanName,
+                fromState = "CREATED",
+                toState = "DUE",
+                commandName = "OnAddMedicationSchedule",
+                idempotencyKey = IdempotencyKey("idem-add-med-${System.nanoTime()}"),
+                occurredAt = current.simulatedClockMillis,
+                formattedTime = formatClock(current.simulatedClockMillis.millis),
+                detail = "Added $cleanName ($cleanStrength) at $cleanTime · Armed AlarmManager + Synced to FamilyVault (${current.cloudVault.familyVaultId})"
+            )
+            current.copy(
+                activeWindowId = newWindowId,
+                windows = listOf(newRecord) + current.windows,
+                auditLedger = listOf(addAudit) + current.auditLedger
+            )
+        }
+        return newWindowId
     }
 
     private fun createInitialSnapshot(): RepositorySnapshot {

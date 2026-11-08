@@ -118,6 +118,8 @@ fun MainScreen(
                     onToggleVisionBoost = viewModel::toggleSeniorLargeVisionBoost,
                     onToggleLedgerSheet = viewModel::toggleArchitectureLedgerSheet,
                     onToggleAccountSheet = viewModel::toggleAccountSignInSheet,
+                    onToggleAddMedicationSheet = viewModel::toggleAddMedicationSheet,
+                    onAddNewMedication = viewModel::onAddNewMedication,
                     onSignInWithProvider = viewModel::onSignInWithProvider,
                     onSignOut = viewModel::onSignOut,
                     onSelectWindow = viewModel::selectDoseWindow,
@@ -145,6 +147,8 @@ internal fun KinDoseInteractiveScaffold(
     onToggleVisionBoost: () -> Unit,
     onToggleLedgerSheet: (Boolean) -> Unit,
     onToggleAccountSheet: (Boolean) -> Unit = {},
+    onToggleAddMedicationSheet: (Boolean) -> Unit = {},
+    onAddNewMedication: (String, String, String, String, String, PillShape, String, String) -> Unit = { _, _, _, _, _, _, _, _ -> },
     onSignInWithProvider: (IdentityProvider, String, String) -> Unit = { _, _, _ -> },
     onSignOut: () -> Unit = {},
     onSelectWindow: (DoseWindowId) -> Unit,
@@ -185,6 +189,10 @@ internal fun KinDoseInteractiveScaffold(
         bottomBar = {
             FloatingScenarioPillBar(
                 activeRecord = snapshot.activeRecord,
+                onOpenAddMedication = {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onToggleAddMedicationSheet(true)
+                },
                 onSimulateDuplicateTap = {
                     haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                     onSimulateDuplicateTap()
@@ -209,13 +217,17 @@ internal fun KinDoseInteractiveScaffold(
                 .padding(horizontal = 20.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
-            // Expressive Pill Schedule Carousel (8:00 AM, 1:00 PM, 8:00 PM)
+            // Expressive Pill Schedule Carousel (8:00 AM, 1:00 PM, 8:00 PM) + "+ Add Medication"
             ExpressiveScheduleStrip(
                 windows = snapshot.windows,
                 activeWindowId = snapshot.activeWindowId,
                 onSelectWindow = {
                     haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                     onSelectWindow(it)
+                },
+                onOpenAddMedication = {
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onToggleAddMedicationSheet(true)
                 }
             )
 
@@ -276,6 +288,20 @@ internal fun KinDoseInteractiveScaffold(
             TransactionalOutboxAndAuditSheetContent(
                 snapshot = snapshot,
                 onClose = { onToggleLedgerSheet(false) }
+            )
+        }
+    }
+
+    if (controls.showAddMedicationSheet) {
+        val addMedSheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(
+            onDismissRequest = { onToggleAddMedicationSheet(false) },
+            sheetState = addMedSheetState,
+            containerColor = MaterialTheme.colorScheme.surface
+        ) {
+            AddMedicationModalSheetContent(
+                onSaveMedication = onAddNewMedication,
+                onClose = { onToggleAddMedicationSheet(false) }
             )
         }
     }
@@ -516,20 +542,63 @@ private fun ExpressiveTopHeader(
 }
 
 /**
- * Tactile Pill-Shaped Schedule Carousel with Zero Harsh Outlines.
+ * Tactile Pill-Shaped Schedule Carousel with Zero Harsh Outlines + Prominent "+ Add Medication" Action.
  */
 @Composable
 private fun ExpressiveScheduleStrip(
     windows: List<DoseWindowRecord>,
     activeWindowId: DoseWindowId,
-    onSelectWindow: (DoseWindowId) -> Unit
+    onSelectWindow: (DoseWindowId) -> Unit,
+    onOpenAddMedication: () -> Unit = {}
 ) {
     val safetyColors = KinDoseThemeTokens.safetyColors
 
-    LazyRow(
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        modifier = Modifier.fillMaxWidth()
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Today's Schedule (${windows.size} Meds)",
+                style = MaterialTheme.typography.titleMedium,
+                fontFamily = GoogleSansDisplayFamily,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onBackground
+            )
+
+            Surface(
+                onClick = onOpenAddMedication,
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.semantics {
+                    role = Role.Button
+                    contentDescription = "Add New Medication to Schedule"
+                }
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = "+ Add Medication",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontFamily = GoogleSansDisplayFamily,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                }
+            }
+        }
+
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
         items(windows, key = { it.spec.doseWindowId.value }) { item ->
             val isSelected = item.spec.doseWindowId == activeWindowId
             val (statusLabel, dotColor) = when (item.state) {
@@ -597,6 +666,7 @@ private fun ExpressiveScheduleStrip(
                     )
                 }
             }
+        }
         }
     }
 }
@@ -1440,6 +1510,7 @@ internal fun CaregiverCommandCenterSurface(
 @Composable
 private fun FloatingScenarioPillBar(
     activeRecord: DoseWindowRecord,
+    onOpenAddMedication: () -> Unit = {},
     onSimulateDuplicateTap: () -> Unit,
     onSimulateEscalation: () -> Unit,
     onResetScenario: () -> Unit,
@@ -1465,13 +1536,15 @@ private fun FloatingScenarioPillBar(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Surface(
-                    onClick = onResetScenario,
+                    onClick = onOpenAddMedication,
                     shape = CircleShape,
-                    color = MaterialTheme.colorScheme.surfaceVariant
+                    color = MaterialTheme.colorScheme.primary
                 ) {
                     Text(
-                        text = "8 AM Due",
+                        text = "+ Add Med",
                         style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        fontWeight = FontWeight.Bold,
                         maxLines = 1,
                         softWrap = false,
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
@@ -1897,6 +1970,292 @@ private fun AccountSignInModalSheetContent(
             ) {
                 Text("Audit Logs")
             }
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
+    }
+}
+
+private data class QuickMedicationPreset(
+    val name: String,
+    val strength: String,
+    val timeLabel: String,
+    val purpose: String,
+    val foodWarning: String,
+    val shape: PillShape,
+    val colorLabel: String,
+    val imprint: String
+)
+
+/**
+ * First-Class "Add New Medication" Material 3 Expressive Sheet.
+ * Supports 1-tap clinical presets + custom Medication Name, Strength, Schedule Time,
+ * Visual Pill Shape, and Pill Color so seniors and caregivers can add any medication end-to-end.
+ */
+@Composable
+private fun AddMedicationModalSheetContent(
+    onSaveMedication: (
+        medicationName: String,
+        strengthLabel: String,
+        scheduledTimeLabel: String,
+        clinicalPurpose: String,
+        foodWarning: String,
+        pillShape: PillShape,
+        pillColorLabel: String,
+        imprintCode: String
+    ) -> Unit,
+    onClose: () -> Unit
+) {
+    val presets = remember {
+        listOf(
+            QuickMedicationPreset(
+                name = "Metformin",
+                strength = "500 mg",
+                timeLabel = "8:00 AM",
+                purpose = "Blood Sugar & Metabolic Control",
+                foodWarning = "Take with breakfast to prevent stomach upset",
+                shape = PillShape.ROUND_TABLET,
+                colorLabel = "White Round Tablet",
+                imprint = "GL 500"
+            ),
+            QuickMedicationPreset(
+                name = "Aspirin",
+                strength = "81 mg",
+                timeLabel = "9:00 AM",
+                purpose = "Daily Heart & Platelet Protection",
+                foodWarning = "Take with a full glass of water",
+                shape = PillShape.ROUND_TABLET,
+                colorLabel = "Warm Yellow Enteric Tablet",
+                imprint = "BAYER 81"
+            ),
+            QuickMedicationPreset(
+                name = "Vitamin D3",
+                strength = "2000 IU",
+                timeLabel = "1:00 PM",
+                purpose = "Bone Density & Immune Support",
+                foodWarning = "Best absorbed with lunch",
+                shape = PillShape.OVAL_CAPLET,
+                colorLabel = "Golden Softgel Caplet",
+                imprint = "D3 2K"
+            ),
+            QuickMedicationPreset(
+                name = "Amlodipine",
+                strength = "5 mg",
+                timeLabel = "8:00 PM",
+                purpose = "Evening Blood Pressure Support",
+                foodWarning = "Can be taken with or without food",
+                shape = PillShape.TWO_TONE_CAPSULE,
+                colorLabel = "Blue & White Capsule",
+                imprint = "NOR 5"
+            )
+        )
+    }
+
+    var medName by remember { mutableStateOf("Metformin") }
+    var strength by remember { mutableStateOf("500 mg") }
+    var selectedTime by remember { mutableStateOf("8:00 AM") }
+    var purpose by remember { mutableStateOf("Blood Sugar & Metabolic Control") }
+    var foodNote by remember { mutableStateOf("Take with breakfast to prevent stomach upset") }
+    var selectedShape by remember { mutableStateOf(PillShape.ROUND_TABLET) }
+    var colorLabel by remember { mutableStateOf("White Round Tablet") }
+    var imprint by remember { mutableStateOf("GL 500") }
+
+    val timeOptions = listOf("8:00 AM", "9:00 AM", "1:00 PM", "6:00 PM", "8:00 PM")
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 22.dp, vertical = 8.dp)
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                Text(
+                    text = "Add New Medication",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontFamily = GoogleSansDisplayFamily,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.semantics { heading() }
+                )
+                Text(
+                    text = "Tap a quick preset or enter custom prescription details",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            TextButton(onClick = onClose) {
+                Text("Close")
+            }
+        }
+
+        // 1. One-Tap Common Senior Medication Presets
+        Text(
+            text = "QUICK PRESETS (1-TAP AUTO-FILL)",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(presets) { preset ->
+                val isSelected = medName.equals(preset.name, ignoreCase = true)
+                FilterChip(
+                    selected = isSelected,
+                    onClick = {
+                        medName = preset.name
+                        strength = preset.strength
+                        selectedTime = preset.timeLabel
+                        purpose = preset.purpose
+                        foodNote = preset.foodWarning
+                        selectedShape = preset.shape
+                        colorLabel = preset.colorLabel
+                        imprint = preset.imprint
+                    },
+                    shape = CircleShape,
+                    label = {
+                        Text(
+                            text = "${preset.name} (${preset.strength})",
+                            fontFamily = GoogleSansDisplayFamily,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                )
+            }
+        }
+
+        // 2. Medication Name & Strength Inputs
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            OutlinedTextField(
+                value = medName,
+                onValueChange = { medName = it },
+                label = { Text("Medication Name") },
+                singleLine = true,
+                shape = RoundedCornerShape(18.dp),
+                modifier = Modifier.weight(1.4f)
+            )
+            OutlinedTextField(
+                value = strength,
+                onValueChange = { strength = it },
+                label = { Text("Strength") },
+                singleLine = true,
+                shape = RoundedCornerShape(18.dp),
+                modifier = Modifier.weight(1f)
+            )
+        }
+
+        // 3. Clinical Purpose Input
+        OutlinedTextField(
+            value = purpose,
+            onValueChange = { purpose = it },
+            label = { Text("What is this medication for?") },
+            singleLine = true,
+            shape = RoundedCornerShape(18.dp),
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        // 4. Schedule Time Slot Picker
+        Text(
+            text = "SCHEDULE TIME OF DAY",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(timeOptions) { timeSlot ->
+                FilterChip(
+                    selected = selectedTime == timeSlot,
+                    onClick = { selectedTime = timeSlot },
+                    shape = CircleShape,
+                    label = {
+                        Text(
+                            text = timeSlot,
+                            fontFamily = GoogleSansDisplayFamily,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                )
+            }
+        }
+
+        // 5. Visual Pill Shape Picker (Crucial for Senior Safety Identification)
+        Text(
+            text = "PILL APPEARANCE FOR SENIOR VISUAL CHECK",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            PillShape.entries.forEach { shape ->
+                val isChosen = selectedShape == shape
+                Surface(
+                    onClick = {
+                        selectedShape = shape
+                        colorLabel = when (shape) {
+                            PillShape.ROUND_TABLET -> "White Round Tablet"
+                            PillShape.OVAL_CAPLET -> "Golden Oval Caplet"
+                            PillShape.TWO_TONE_CAPSULE -> "Blue & White Capsule"
+                        }
+                    },
+                    shape = RoundedCornerShape(18.dp),
+                    color = if (isChosen) {
+                        MaterialTheme.colorScheme.primaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+                    },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(
+                        text = shape.a11yDescription.substringBefore(","),
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = if (isChosen) FontWeight.Bold else FontWeight.Medium,
+                        color = if (isChosen) {
+                            MaterialTheme.colorScheme.onPrimaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 12.dp)
+                    )
+                }
+            }
+        }
+
+        // 6. Save & Schedule Primary CTA Button
+        Button(
+            onClick = {
+                onSaveMedication(
+                    medName,
+                    strength,
+                    selectedTime,
+                    purpose,
+                    foodNote,
+                    selectedShape,
+                    colorLabel,
+                    imprint
+                )
+            },
+            shape = RoundedCornerShape(24.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(60.dp)
+        ) {
+            Text(
+                text = "Save & Schedule $medName ($selectedTime)",
+                style = MaterialTheme.typography.titleMedium,
+                fontFamily = GoogleSansDisplayFamily,
+                fontWeight = FontWeight.Bold
+            )
         }
 
         Spacer(modifier = Modifier.height(20.dp))
