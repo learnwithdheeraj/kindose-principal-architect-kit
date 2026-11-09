@@ -476,7 +476,7 @@ private fun ExpressiveTopHeader(
                         .height(40.dp)
                         .semantics {
                             role = Role.Button
-                            contentDescription = "Open Sign In and Cloud Account Switcher"
+                            contentDescription = "Open Profile and Account Switcher"
                         }
                 ) {
                     Row(
@@ -1453,11 +1453,20 @@ internal fun SeniorApplianceHeroSurface(
                                 },
                                 shape = CircleShape
                             ) {
+                                val periodLabel = when {
+                                    spec.scheduledTimeLabel.uppercase().contains("AM") -> "Morning Dose"
+                                    spec.scheduledTimeLabel.startsWith("12:") ||
+                                        spec.scheduledTimeLabel.startsWith("1:") ||
+                                        spec.scheduledTimeLabel.startsWith("2:") ||
+                                        spec.scheduledTimeLabel.startsWith("3:") ||
+                                        spec.scheduledTimeLabel.startsWith("4:") -> "Afternoon Dose"
+                                    else -> "Evening Dose"
+                                }
                                 Text(
                                     text = when {
                                         isEscalated -> "Overdue · Family Alerted"
                                         isSnoozed -> "Snoozed (${state.snoozeCount} of ${spec.maxSnoozes})"
-                                        else -> "${spec.scheduledTimeLabel} Morning Dose"
+                                        else -> "${spec.scheduledTimeLabel} $periodLabel"
                                     },
                                     style = MaterialTheme.typography.labelLarge,
                                     color = if (isEscalated || isSnoozed) {
@@ -1564,7 +1573,7 @@ internal fun SeniorApplianceHeroSurface(
                                     )
                                     Text(
                                         text = if (isEscalated) {
-                                            "Sends instant All-Clear to Maya"
+                                            "Sends instant All-Clear to Care Circle"
                                         } else {
                                             "Confirm ${spec.scheduledTimeLabel} dose & lock safety shield"
                                         },
@@ -2170,12 +2179,12 @@ private fun FloatingScenarioPillBar(
                     color = MaterialTheme.colorScheme.surfaceVariant
                 ) {
                     Text(
-                        text = "Sign In",
+                        text = "Profile",
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.Bold,
                         maxLines = 1,
                         softWrap = false,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
                     )
                 }
             }
@@ -2184,14 +2193,9 @@ private fun FloatingScenarioPillBar(
 }
 
 /**
- * First-Class Multi-Provider Sign-In, CredentialManager & Zero-Loss Device Restore Sheet.
- * Supports:
- * 1. Continue with Google (Jetpack CredentialManager / GetGoogleIdOption)
- * 2. Sign in with Biometric Passkey (FIDO2 / WebAuthn)
- * 3. Continue with Facebook (OAuth 2.1)
- * 4. Continue with Apple (OIDC)
- * 5. Senior Zero-Password QR Pairing Code (`849-204`)
- * 6. One-Tap New Phone Restore & Sign Out
+ * First-Class Profile & Account Switcher Sheet (when authenticated) + Multi-Provider CredentialManager Vault.
+ * Dynamically adapts all titles, badges, and actions based on `vault.isSignedIn` so authenticated users
+ * see a true One-Google / Material 3 Profile & Account Switcher without redundant "Sign In" prompts.
  */
 @Composable
 private fun AccountSignInModalSheetContent(
@@ -2294,14 +2298,22 @@ private fun AccountSignInModalSheetContent(
                 verticalArrangement = Arrangement.spacedBy(2.dp)
             ) {
                 Text(
-                    text = "Sign In & Cloud Vault",
+                    text = if (vault.isSignedIn) {
+                        "Profile & Account Switcher"
+                    } else {
+                        "Sign In & Cloud Vault"
+                    },
                     style = MaterialTheme.typography.headlineSmall,
                     fontFamily = GoogleSansDisplayFamily,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.semantics { heading() }
                 )
                 Text(
-                    text = "Keep schedules & streaks safe across any phone change",
+                    text = if (vault.isSignedIn) {
+                        "Manage your active KinDose profile, switch accounts, or sign out"
+                    } else {
+                        "Keep schedules & streaks safe across any phone change"
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -2311,7 +2323,7 @@ private fun AccountSignInModalSheetContent(
             }
         }
 
-        // Active Account Banner
+        // Active Profile Card (One-Google / Material 3 Expressive Style)
         Surface(
             color = if (vault.isSignedIn) {
                 safetyColors.safeEmeraldContainer
@@ -2321,77 +2333,92 @@ private fun AccountSignInModalSheetContent(
             shape = RoundedCornerShape(24.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
-            Row(
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Column(
-                    modifier = Modifier.weight(1f).padding(end = 10.dp),
-                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Text(
-                        text = if (vault.isSignedIn) {
-                            "${vault.accountDisplayName} · ${vault.activeProvider.displayName}"
-                        } else {
-                            "Signed Out (Local Offline Mode)"
-                        },
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = if (vault.isSignedIn) {
-                            safetyColors.onSafeEmeraldContainer
-                        } else {
-                            safetyColors.onShieldAmberContainer
-                        }
-                    )
-                    Text(
-                        text = if (vault.isSignedIn) {
-                            "${vault.primaryEmail} · ${vault.currentDeviceModel}"
-                        } else {
-                            "Select any provider below to restore your Family Vault"
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (vault.isSignedIn) {
-                            safetyColors.onSafeEmeraldContainer.copy(alpha = 0.85f)
-                        } else {
-                            safetyColors.onShieldAmberContainer.copy(alpha = 0.85f)
-                        }
-                    )
-                }
-
-                if (vault.isSignedIn) {
-                    Surface(
-                        onClick = onSignOut,
-                        shape = CircleShape,
-                        color = Color.White.copy(alpha = 0.75f)
+                    if (vault.isSignedIn) {
+                        GoogleFourColorRingBadge(
+                            initial = vault.accountDisplayName.take(1).uppercase(),
+                            sizeDp = 46
+                        )
+                    }
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
                         Text(
-                            text = "Sign Out",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = safetyColors.onSafeEmeraldContainer,
+                            text = if (vault.isSignedIn) {
+                                "${vault.accountDisplayName} · ${vault.activeProvider.displayName}"
+                            } else {
+                                "Signed Out (Zero-Trust Gate Active)"
+                            },
+                            style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                            color = if (vault.isSignedIn) {
+                                safetyColors.onSafeEmeraldContainer
+                            } else {
+                                safetyColors.onShieldAmberContainer
+                            }
                         )
+                        Text(
+                            text = if (vault.isSignedIn) {
+                                "${vault.primaryEmail} · ${vault.currentDeviceModel}"
+                            } else {
+                                "Select any provider below to restore your Family Vault"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (vault.isSignedIn) {
+                                safetyColors.onSafeEmeraldContainer.copy(alpha = 0.85f)
+                            } else {
+                                safetyColors.onShieldAmberContainer.copy(alpha = 0.85f)
+                            }
+                        )
+                    }
+
+                    if (vault.isSignedIn) {
+                        Surface(
+                            onClick = onSignOut,
+                            shape = CircleShape,
+                            color = Color.White.copy(alpha = 0.82f)
+                        ) {
+                            Text(
+                                text = "Sign Out",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = safetyColors.onSafeEmeraldContainer,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
+                            )
+                        }
                     }
                 }
             }
         }
 
         Text(
-            text = "CHOOSE SIGN-IN METHOD (JETPACK CREDENTIAL MANAGER)",
+            text = if (vault.isSignedIn) {
+                "SWITCH ACCOUNT OR IDENTITY PROVIDER"
+            } else {
+                "CHOOSE SIGN-IN METHOD (JETPACK CREDENTIAL MANAGER)"
+            },
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
-        // 1. Continue with Google (Launches GM3 Expressive CredentialManager Account Switcher)
+        // 1. Switch Google Account (Launches GM3 Expressive CredentialManager Account Switcher)
         ProviderSignInButton(
             badgeText = "G",
             badgeColor = Color(0xFF4285F4),
-            title = "Continue with Google",
+            title = if (vault.isSignedIn) "Switch Google Account" else "Continue with Google",
             subtitle = if (vault.isSignedIn && vault.activeProvider == IdentityProvider.GOOGLE_ONE_TAP) {
-                "Signed in as ${vault.primaryEmail} · Tap to switch Google account"
+                "Active: ${vault.primaryEmail} · Tap to switch or add Google account"
             } else {
                 "GM3 Expressive Google Account Switcher (Device com.google)"
             },
@@ -2402,11 +2429,11 @@ private fun AccountSignInModalSheetContent(
             }
         )
 
-        // 2. Sign in with Biometric Passkey
+        // 2. Switch to Biometric Passkey
         ProviderSignInButton(
             badgeText = "PK",
             badgeColor = Color(0xFF0D7452),
-            title = "Sign in with Biometric Passkey",
+            title = if (vault.isSignedIn) "Switch to Biometric Passkey" else "Sign in with Biometric Passkey",
             subtitle = "FIDO2 / WebAuthn Fingerprint · Synced in Google Password Manager",
             isCurrent = vault.isSignedIn && vault.activeProvider == IdentityProvider.PASSKEY_FIDO2,
             onClick = {
@@ -2418,11 +2445,11 @@ private fun AccountSignInModalSheetContent(
             }
         )
 
-        // 3. Continue with Facebook
+        // 3. Switch to Facebook
         ProviderSignInButton(
             badgeText = "f",
             badgeColor = Color(0xFF1877F2),
-            title = "Continue with Facebook",
+            title = if (vault.isSignedIn) "Switch to Facebook Account" else "Continue with Facebook",
             subtitle = "Meta OAuth 2.1 · Linked to Family Vault ${vault.familyVaultId}",
             isCurrent = vault.isSignedIn && vault.activeProvider == IdentityProvider.FACEBOOK_OAUTH,
             onClick = {
@@ -2434,11 +2461,11 @@ private fun AccountSignInModalSheetContent(
             }
         )
 
-        // 4. Continue with Apple ID
+        // 4. Switch to Apple ID
         ProviderSignInButton(
             badgeText = "A",
             badgeColor = Color(0xFF1F2937),
-            title = "Continue with Apple",
+            title = if (vault.isSignedIn) "Switch to Apple ID" else "Continue with Apple",
             subtitle = "Apple OIDC · Cross-platform family access",
             isCurrent = vault.isSignedIn && vault.activeProvider == IdentityProvider.APPLE_ID,
             onClick = {
@@ -2916,7 +2943,11 @@ private fun Gm3ExpressiveGoogleAccountPickerDialog(
                         GoogleFourColorRingBadge(initial = "G", sizeDp = 36)
                         Column {
                             Text(
-                                text = "Sign in with Google",
+                                text = if (activeEmail.isNullOrBlank()) {
+                                    "Sign in with Google"
+                                } else {
+                                    "Switch Google Account"
+                                },
                                 style = MaterialTheme.typography.titleMedium,
                                 fontFamily = GoogleSansDisplayFamily,
                                 fontWeight = FontWeight.Bold,
