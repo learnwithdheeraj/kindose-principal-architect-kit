@@ -214,6 +214,12 @@ sealed interface DoseCommand {
         override val occurredAt: EpochMillis,
         override val idempotencyKey: IdempotencyKey
     ) : DoseCommand
+
+    data class OnSeniorUndoConfirm(
+        val reason: String = "Accidental tap — pill not taken yet",
+        override val occurredAt: EpochMillis,
+        override val idempotencyKey: IdempotencyKey
+    ) : DoseCommand
 }
 
 /**
@@ -247,6 +253,7 @@ sealed interface DoseSideEffect {
 
 enum class OutboxEventType(val displayLabel: String) {
     DOSE_CONFIRMED_ON_TIME("Senior Confirmed Dose On-Time"),
+    DOSE_CONFIRMATION_UNDONE("Senior Reverted Accidental Confirmation -> Re-Armed Watchdog"),
     DOSE_ESCALATED_TO_CAREGIVER("Grace Period Expired -> Caregiver Push/SMS Dispatched"),
     CAREGIVER_ALL_CLEAR_LATE_CONFIRM("Senior Confirmed Late -> Caregiver All-Clear Sent"),
     CAREGIVER_MANUALLY_RESOLVED("Caregiver Verified & Resolved Dose"),

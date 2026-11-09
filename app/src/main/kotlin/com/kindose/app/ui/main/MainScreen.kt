@@ -52,11 +52,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation3.runtime.NavKey
+import com.kindose.app.auth.AndroidJetpackCredentialGateway
 import com.kindose.app.data.DefaultDataRepository
 import com.kindose.app.data.DoseWindowRecord
+import com.kindose.app.data.LocalVaultPersistenceStore
 import com.kindose.app.data.RepositorySnapshot
 import com.kindose.app.domain.*
 import com.kindose.app.ui.theme.GoogleSansDisplayFamily
@@ -68,9 +72,25 @@ import com.kindose.app.ui.theme.KinDoseThemeTokens
 fun MainScreen(
     onItemClick: (NavKey) -> Unit = {},
     modifier: Modifier = Modifier,
-    viewModel: MainScreenViewModel = viewModel { MainScreenViewModel(DefaultDataRepository()) }
+    viewModel: MainScreenViewModel? = null
 ) {
-    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val resolvedViewModel: MainScreenViewModel = viewModel ?: viewModel {
+        val store = LocalVaultPersistenceStore(context.applicationContext)
+        MainScreenViewModel(
+            dataRepository = DefaultDataRepository(
+                startSignedIn = false,
+                persistenceStore = store
+            ),
+            authGateway = AndroidJetpackCredentialGateway(appContext = context.applicationContext)
+        )
+    }
+
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        resolvedViewModel.onVerifyCacheSessionOnResume()
+    }
+
+    val uiState by resolvedViewModel.uiState.collectAsStateWithLifecycle()
 
     when (val state = uiState) {
         MainScreenUiState.Loading -> {
@@ -114,23 +134,28 @@ fun MainScreen(
                 KinDoseInteractiveScaffold(
                     snapshot = state.snapshot,
                     controls = state.controls,
-                    onSwitchPersona = viewModel::switchPersona,
-                    onToggleVisionBoost = viewModel::toggleSeniorLargeVisionBoost,
-                    onToggleLedgerSheet = viewModel::toggleArchitectureLedgerSheet,
-                    onToggleAccountSheet = viewModel::toggleAccountSignInSheet,
-                    onToggleAddMedicationSheet = viewModel::toggleAddMedicationSheet,
-                    onAddNewMedication = viewModel::onAddNewMedication,
-                    onSignInWithProvider = viewModel::onSignInWithProvider,
-                    onSignOut = viewModel::onSignOut,
-                    onSelectWindow = viewModel::selectDoseWindow,
-                    onSeniorConfirm = viewModel::onSeniorConfirmTap,
-                    onSeniorSnooze = viewModel::onSeniorSnoozeTap,
-                    onCaregiverResolve = viewModel::onCaregiverResolveTap,
-                    onSimulateDuplicateTap = viewModel::onSimulateDuplicateTapAfter18m,
-                    onSimulateEscalation = viewModel::onSimulateEscalationBreach,
-                    onResetScenario = viewModel::onResetScenarioToDue,
-                    onSwitchIdentityProvider = viewModel::onSwitchIdentityProvider,
-                    onSimulateNewPhoneRestore = viewModel::onSimulateNewPhoneRestore,
+                    onSwitchPersona = resolvedViewModel::switchPersona,
+                    onToggleVisionBoost = resolvedViewModel::toggleSeniorLargeVisionBoost,
+                    onToggleLedgerSheet = resolvedViewModel::toggleArchitectureLedgerSheet,
+                    onToggleAccountSheet = resolvedViewModel::toggleAccountSignInSheet,
+                    onToggleAddMedicationSheet = resolvedViewModel::toggleAddMedicationSheet,
+                    onAddNewMedication = resolvedViewModel::onAddNewMedication,
+                    onDeleteActiveMedication = resolvedViewModel::onDeleteActiveMedication,
+                    onSignInWithProvider = resolvedViewModel::onSignInWithProvider,
+                    onVerifySeniorPairingCode = resolvedViewModel::onVerifySeniorPairingCode,
+                    onSignOut = resolvedViewModel::onSignOut,
+                    onSelectWindow = resolvedViewModel::selectDoseWindow,
+                    onSeniorConfirm = resolvedViewModel::onSeniorConfirmTap,
+                    onSeniorUndoConfirm = resolvedViewModel::onSeniorUndoConfirmTap,
+                    onSeniorSnooze = resolvedViewModel::onSeniorSnoozeTap,
+                    onCaregiverResolve = resolvedViewModel::onCaregiverResolveTap,
+                    onSimulateDuplicateTap = resolvedViewModel::onSimulateDuplicateTapAfter18m,
+                    onSimulateEscalation = resolvedViewModel::onSimulateEscalationBreach,
+                    onResetScenario = resolvedViewModel::onResetScenarioToDue,
+                    onSwitchIdentityProvider = resolvedViewModel::onSwitchIdentityProvider,
+                    onSimulateNewPhoneRestore = resolvedViewModel::onSimulateNewPhoneRestore,
+                    onFlushOutboxQueue = resolvedViewModel::onFlushOutboxQueue,
+                    onDismissStatusBanner = resolvedViewModel::dismissStatusBanner,
                     modifier = modifier
                 )
             }
@@ -149,10 +174,13 @@ internal fun KinDoseInteractiveScaffold(
     onToggleAccountSheet: (Boolean) -> Unit = {},
     onToggleAddMedicationSheet: (Boolean) -> Unit = {},
     onAddNewMedication: (String, String, String, String, String, PillShape, String, String) -> Unit = { _, _, _, _, _, _, _, _ -> },
+    onDeleteActiveMedication: () -> Unit = {},
     onSignInWithProvider: (IdentityProvider, String, String) -> Unit = { _, _, _ -> },
+    onVerifySeniorPairingCode: (String, String) -> Unit = { _, _ -> },
     onSignOut: () -> Unit = {},
     onSelectWindow: (DoseWindowId) -> Unit,
     onSeniorConfirm: () -> Unit,
+    onSeniorUndoConfirm: () -> Unit = {},
     onSeniorSnooze: () -> Unit,
     onCaregiverResolve: (String) -> Unit,
     onSimulateDuplicateTap: () -> Unit,
@@ -160,10 +188,28 @@ internal fun KinDoseInteractiveScaffold(
     onResetScenario: () -> Unit,
     onSwitchIdentityProvider: (IdentityProvider) -> Unit = {},
     onSimulateNewPhoneRestore: () -> Unit = {},
+    onFlushOutboxQueue: () -> Unit = {},
+    onDismissStatusBanner: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val haptics = LocalHapticFeedback.current
     val scrollState = rememberScrollState()
+
+    // ZERO-TRUST SECURITY GATE:
+    // When signed out (fresh install, cleared cache, cleared storage, or explicit Sign Out),
+    // never expose patient medical schedules or pre-select any account. Render the dedicated
+    // full-screen Welcome & Authentication Gate first.
+    if (!snapshot.cloudVault.isSignedIn) {
+        KinDoseWelcomeAuthGateScreen(
+            snapshot = snapshot,
+            controls = controls,
+            onSignInWithProvider = onSignInWithProvider,
+            onVerifySeniorPairingCode = onVerifySeniorPairingCode,
+            onDismissStatusBanner = onDismissStatusBanner,
+            modifier = modifier
+        )
+        return
+    }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -215,8 +261,16 @@ internal fun KinDoseInteractiveScaffold(
                 .padding(innerPadding)
                 .verticalScroll(scrollState)
                 .padding(horizontal = 20.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(18.dp)
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            if (!controls.lastStatusBanner.isNullOrBlank()) {
+                LiveStatusAndErrorBanner(
+                    message = controls.lastStatusBanner,
+                    isError = controls.isStatusBannerError,
+                    onDismiss = onDismissStatusBanner
+                )
+            }
+
             // Expressive Pill Schedule Carousel (8:00 AM, 1:00 PM, 8:00 PM) + "+ Add Medication"
             ExpressiveScheduleStrip(
                 windows = snapshot.windows,
@@ -228,6 +282,10 @@ internal fun KinDoseInteractiveScaffold(
                 onOpenAddMedication = {
                     haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                     onToggleAddMedicationSheet(true)
+                },
+                onDeleteActiveMedication = {
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onDeleteActiveMedication()
                 }
             )
 
@@ -245,6 +303,10 @@ internal fun KinDoseInteractiveScaffold(
                             onConfirmTap = {
                                 haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                                 onSeniorConfirm()
+                            },
+                            onUndoConfirmTap = {
+                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                onSeniorUndoConfirm()
                             },
                             onSnoozeTap = {
                                 haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -287,6 +349,7 @@ internal fun KinDoseInteractiveScaffold(
         ) {
             TransactionalOutboxAndAuditSheetContent(
                 snapshot = snapshot,
+                onFlushOutbox = onFlushOutboxQueue,
                 onClose = { onToggleLedgerSheet(false) }
             )
         }
@@ -300,13 +363,14 @@ internal fun KinDoseInteractiveScaffold(
             containerColor = MaterialTheme.colorScheme.surface
         ) {
             AddMedicationModalSheetContent(
+                validationError = controls.addMedicationValidationError,
                 onSaveMedication = onAddNewMedication,
                 onClose = { onToggleAddMedicationSheet(false) }
             )
         }
     }
 
-    if (controls.showAccountSignInSheet || !snapshot.cloudVault.isSignedIn) {
+    if (controls.showAccountSignInSheet) {
         val accountSheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)
         ModalBottomSheet(
             onDismissRequest = { onToggleAccountSheet(false) },
@@ -315,7 +379,9 @@ internal fun KinDoseInteractiveScaffold(
         ) {
             AccountSignInModalSheetContent(
                 snapshot = snapshot,
+                pairingCodeValidationError = controls.pairingCodeValidationError,
                 onSignInWithProvider = onSignInWithProvider,
+                onVerifySeniorPairingCode = onVerifySeniorPairingCode,
                 onSignOut = onSignOut,
                 onSimulateNewPhoneRestore = {
                     onSimulateNewPhoneRestore()
@@ -381,7 +447,7 @@ private fun ExpressiveTopHeader(
                 )
                 Text(
                     text = if (vault.isSignedIn) {
-                        "Synced · ${vault.accountDisplayName}"
+                        "Synced · ${vault.accountDisplayName.substringBefore(" ")}"
                     } else {
                         "Offline Mode · Tap Sign In"
                     },
@@ -442,13 +508,15 @@ private fun ExpressiveTopHeader(
                         }
                         Text(
                             text = if (vault.isSignedIn) {
-                                vault.accountDisplayName.substringBefore(" ").take(10)
+                                vault.accountDisplayName.substringBefore(" ")
                             } else {
                                 "Sign In"
                             },
                             style = MaterialTheme.typography.labelLarge,
                             fontFamily = GoogleSansDisplayFamily,
                             fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            softWrap = false,
                             color = if (vault.isSignedIn) {
                                 MaterialTheme.colorScheme.onPrimaryContainer
                             } else {
@@ -494,7 +562,7 @@ private fun ExpressiveTopHeader(
             }
         }
 
-        // Expressive Pill Mode Switcher (Eleanor's Screen vs. Family Caregiver)
+        // Expressive Pill Mode Switcher (Patient's Screen vs. Family Caregiver)
         Surface(
             color = MaterialTheme.colorScheme.surfaceVariant,
             shape = CircleShape,
@@ -507,7 +575,7 @@ private fun ExpressiveTopHeader(
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 val tabs = listOf(
-                    AppPersonaSurface.SENIOR_APPLIANCE to "Eleanor's View",
+                    AppPersonaSurface.SENIOR_APPLIANCE to "${snapshot.patientName.substringBefore(" ")}'s View",
                     AppPersonaSurface.CAREGIVER_COMMAND to "Family Caregiver"
                 )
                 tabs.forEach { (persona, label) ->
@@ -550,15 +618,429 @@ private fun ExpressiveTopHeader(
     }
 }
 
+@Composable
+private fun LiveStatusAndErrorBanner(
+    message: String,
+    isError: Boolean,
+    onDismiss: () -> Unit
+) {
+    val safetyColors = KinDoseThemeTokens.safetyColors
+    val containerColor = if (isError) {
+        safetyColors.shieldAmberContainer
+    } else {
+        safetyColors.safeEmeraldContainer
+    }
+    val textColor = if (isError) {
+        safetyColors.onShieldAmberContainer
+    } else {
+        safetyColors.onSafeEmeraldContainer
+    }
+
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        color = containerColor,
+        modifier = Modifier
+            .fillMaxWidth()
+            .semantics { liveRegion = LiveRegionMode.Polite }
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Bold,
+                color = textColor,
+                modifier = Modifier.weight(1f).padding(end = 8.dp)
+            )
+            Surface(
+                onClick = onDismiss,
+                shape = CircleShape,
+                color = Color.White.copy(alpha = 0.65f)
+            ) {
+                Text(
+                    text = "OK",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = textColor,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                )
+            }
+        }
+    }
+}
+
 /**
- * Tactile Pill-Shaped Schedule Carousel with Zero Harsh Outlines + Prominent "+ Add Medication" Action.
+ * ZERO-TRUST FULL-SCREEN WELCOME & AUTHENTICATION GATE (`CUJ 1`).
+ * Rendered whenever the app is launched fresh, after "Clear Cache" / "Clear Storage",
+ * or after an explicit Sign Out.
+ * Never pre-selects any account and never leaks patient medical records before authentication.
+ */
+@Composable
+private fun KinDoseWelcomeAuthGateScreen(
+    snapshot: RepositorySnapshot,
+    controls: LocalUiControls,
+    onSignInWithProvider: (IdentityProvider, String, String) -> Unit,
+    onVerifySeniorPairingCode: (String, String) -> Unit,
+    onDismissStatusBanner: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val safetyColors = KinDoseThemeTokens.safetyColors
+    val context = LocalContext.current
+    var showGm3GooglePicker by remember { mutableStateOf(false) }
+    var deviceGoogleEmails by remember { mutableStateOf(emptyList<String>()) }
+    var pairingCodeInput by remember { mutableStateOf("") }
+    var showPairingCodeBox by remember { mutableStateOf(false) }
+
+    fun refreshDeviceGoogleAccounts(): List<String> {
+        val discovered = try {
+            AccountManager.get(context)
+                .getAccountsByType("com.google")
+                .mapNotNull { it.name?.trim() }
+                .filter { it.isNotEmpty() }
+        } catch (_: Throwable) {
+            emptyList()
+        }
+        deviceGoogleEmails = discovered
+        return discovered
+    }
+
+    val googleAccountPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val selectedEmail = result.data
+                ?.getStringExtra(AccountManager.KEY_ACCOUNT_NAME)
+                ?.trim()
+                .orEmpty()
+            if (selectedEmail.isNotEmpty()) {
+                deviceGoogleEmails = (listOf(selectedEmail) + deviceGoogleEmails).distinct()
+                val localPart = selectedEmail.substringBefore("@")
+                val formattedName = localPart
+                    .split(".", "_", "-")
+                    .filter { it.isNotBlank() }
+                    .joinToString(" ") { part ->
+                        part.replaceFirstChar { ch -> ch.uppercase() }
+                    }
+                    .ifBlank { selectedEmail }
+                onSignInWithProvider(
+                    IdentityProvider.GOOGLE_ONE_TAP,
+                    selectedEmail,
+                    formattedName
+                )
+            }
+        }
+    }
+
+    if (showGm3GooglePicker) {
+        Gm3ExpressiveGoogleAccountPickerDialog(
+            discoveredEmails = deviceGoogleEmails,
+            activeEmail = null, // Strictly null when signed out — zero pre-selection!
+            onSelectGoogleAccount = { email, displayName ->
+                showGm3GooglePicker = false
+                onSignInWithProvider(IdentityProvider.GOOGLE_ONE_TAP, email, displayName)
+            },
+            onAddAnotherGoogleAccount = {
+                showGm3GooglePicker = false
+                try {
+                    val addAccountIntent = Intent(Settings.ACTION_ADD_ACCOUNT).apply {
+                        putExtra(Settings.EXTRA_ACCOUNT_TYPES, arrayOf("com.google"))
+                    }
+                    googleAccountPickerLauncher.launch(addAccountIntent)
+                } catch (_: Throwable) {
+                    @Suppress("DEPRECATION")
+                    val fallbackIntent = AccountManager.newChooseAccountIntent(
+                        null, null, arrayOf("com.google"), null, null, null, null
+                    )
+                    googleAccountPickerLauncher.launch(fallbackIntent)
+                }
+            },
+            onDismiss = { showGm3GooglePicker = false }
+        )
+    }
+
+    Scaffold(
+        modifier = modifier.fillMaxSize(),
+        containerColor = MaterialTheme.colorScheme.background
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 24.dp, vertical = 18.dp),
+            verticalArrangement = Arrangement.spacedBy(18.dp)
+        ) {
+            if (!controls.lastStatusBanner.isNullOrBlank()) {
+                LiveStatusAndErrorBanner(
+                    message = controls.lastStatusBanner,
+                    isError = controls.isStatusBannerError,
+                    onDismiss = onDismissStatusBanner
+                )
+            }
+
+            // Hero Brand & Zero-Trust Security Header
+            Surface(
+                shape = RoundedCornerShape(32.dp),
+                color = MaterialTheme.colorScheme.primaryContainer,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(24.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(38.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = "KD",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontFamily = GoogleSansDisplayFamily,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onPrimary
+                                )
+                            }
+                        }
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.75f)
+                        ) {
+                            Text(
+                                text = "Zero-Trust Clinical Vault · HIPAA / FIDO2 Ready",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp)
+                            )
+                        }
+                    }
+
+                    Text(
+                        text = "Welcome to KinDose",
+                        style = MaterialTheme.typography.displaySmall,
+                        fontFamily = GoogleSansDisplayFamily,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.semantics { heading() }
+                    )
+
+                    Text(
+                        text = "Sign in to unlock your Family Medication Vault, Double-Dose Safety Shield, and real-time caregiver escalation alerts.",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.88f)
+                    )
+                }
+            }
+
+            Text(
+                text = "AUTHENTICATE TO CONTINUE (NO ACCOUNT PRE-SELECTED)",
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            // 1. Primary CTA: Continue with Google (GM3 Expressive Device Account Picker)
+            ProviderSignInButton(
+                badgeText = "G",
+                badgeColor = Color(0xFF4285F4),
+                title = "Continue with Google",
+                subtitle = "Select a Google account on this device via CredentialManager",
+                isCurrent = false,
+                onClick = {
+                    refreshDeviceGoogleAccounts()
+                    showGm3GooglePicker = true
+                }
+            )
+
+            // 2. Sign in with Biometric Passkey (FIDO2 / WebAuthn)
+            ProviderSignInButton(
+                badgeText = "PK",
+                badgeColor = Color(0xFF0D7452),
+                title = "Sign in with Biometric Passkey",
+                subtitle = "Hardware-backed FIDO2 / WebAuthn passkey",
+                isCurrent = false,
+                onClick = {
+                    onSignInWithProvider(
+                        IdentityProvider.PASSKEY_FIDO2,
+                        "maya.vance@passkey.local",
+                        "Maya Vance"
+                    )
+                }
+            )
+
+            // 3. Continue with Facebook
+            ProviderSignInButton(
+                badgeText = "f",
+                badgeColor = Color(0xFF1877F2),
+                title = "Continue with Facebook",
+                subtitle = "Meta OAuth 2.1 federated family login",
+                isCurrent = false,
+                onClick = {
+                    onSignInWithProvider(
+                        IdentityProvider.FACEBOOK_OAUTH,
+                        "maya.vance.fb@facebook.com",
+                        "Maya Vance"
+                    )
+                }
+            )
+
+            // 4. Continue with Apple
+            ProviderSignInButton(
+                badgeText = "A",
+                badgeColor = Color(0xFF1F2937),
+                title = "Continue with Apple",
+                subtitle = "Sign in with Apple OIDC cross-platform family ID",
+                isCurrent = false,
+                onClick = {
+                    onSignInWithProvider(
+                        IdentityProvider.APPLE_ID,
+                        "maya.vance@icloud.com",
+                        "Maya Vance"
+                    )
+                }
+            )
+
+            // 5. Senior 6-Digit Family Pairing Code (With Wrong-Path & Happy-Path Validation)
+            Surface(
+                shape = RoundedCornerShape(24.dp),
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 2.dp,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showPairingCodeBox = !showPairingCodeBox },
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            modifier = Modifier.size(46.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = "QR",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontFamily = GoogleSansMonoFamily,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                            }
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Pair Senior Phone via 6-Digit Code",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontFamily = GoogleSansDisplayFamily,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "Zero passwords for seniors — enter caregiver code (e.g. 849-204)",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    if (!controls.pairingCodeValidationError.isNullOrBlank()) {
+                        Surface(
+                            color = safetyColors.escalationCrimsonContainer,
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = controls.pairingCodeValidationError,
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Bold,
+                                color = safetyColors.onEscalationCrimsonContainer,
+                                modifier = Modifier.padding(12.dp)
+                            )
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedTextField(
+                            value = pairingCodeInput,
+                            onValueChange = { pairingCodeInput = it.take(10) },
+                            label = { Text("6-Digit Pairing Code") },
+                            placeholder = { Text("849-204") },
+                            singleLine = true,
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier.weight(1f)
+                        )
+                        Button(
+                            onClick = {
+                                onVerifySeniorPairingCode(pairingCodeInput, "Eleanor Vance")
+                            },
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier.height(54.dp)
+                        ) {
+                            Text(
+                                text = "Pair Now",
+                                fontFamily = GoogleSansDisplayFamily,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        AssistChip(
+                            onClick = {
+                                pairingCodeInput = "849-204"
+                                onVerifySeniorPairingCode("849-204", "Eleanor Vance")
+                            },
+                            label = { Text("Quick Pair: 849-204") }
+                        )
+                        AssistChip(
+                            onClick = {
+                                pairingCodeInput = "12"
+                                onVerifySeniorPairingCode("12", "Eleanor Vance")
+                            },
+                            label = { Text("Test Invalid Code") }
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+    }
+}
+
+/**
+ * Tactile Pill-Shaped Schedule Carousel with Zero Harsh Outlines + Prominent "+ Add Medication" & "Delete" Actions.
  */
 @Composable
 private fun ExpressiveScheduleStrip(
     windows: List<DoseWindowRecord>,
     activeWindowId: DoseWindowId,
     onSelectWindow: (DoseWindowId) -> Unit,
-    onOpenAddMedication: () -> Unit = {}
+    onOpenAddMedication: () -> Unit = {},
+    onDeleteActiveMedication: () -> Unit = {}
 ) {
     val safetyColors = KinDoseThemeTokens.safetyColors
 
@@ -572,34 +1054,63 @@ private fun ExpressiveScheduleStrip(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "Today's Schedule (${windows.size} Meds)",
+                text = "Schedule (${windows.size} Meds)",
                 style = MaterialTheme.typography.titleMedium,
                 fontFamily = GoogleSansDisplayFamily,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onBackground
             )
 
-            Surface(
-                onClick = onOpenAddMedication,
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.semantics {
-                    role = Role.Button
-                    contentDescription = "Add New Medication to Schedule"
-                }
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                if (windows.size > 1) {
+                    Surface(
+                        onClick = onDeleteActiveMedication,
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        modifier = Modifier.semantics {
+                            role = Role.Button
+                            contentDescription = "Delete selected medication from schedule"
+                        }
+                    ) {
+                        Text(
+                            text = "Remove",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            softWrap = false,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                        )
+                    }
+                }
+
+                Surface(
+                    onClick = onOpenAddMedication,
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.semantics {
+                        role = Role.Button
+                        contentDescription = "Add New Medication to Schedule"
+                    }
                 ) {
-                    Text(
-                        text = "+ Add Medication",
-                        style = MaterialTheme.typography.labelLarge,
-                        fontFamily = GoogleSansDisplayFamily,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onPrimary
-                    )
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = "+ Add Med",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontFamily = GoogleSansDisplayFamily,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            softWrap = false,
+                            color = MaterialTheme.colorScheme.onPrimary
+                        )
+                    }
                 }
             }
         }
@@ -690,6 +1201,7 @@ internal fun SeniorApplianceHeroSurface(
     patientName: String,
     record: DoseWindowRecord,
     onConfirmTap: () -> Unit,
+    onUndoConfirmTap: () -> Unit = {},
     onSnoozeTap: () -> Unit
 ) {
     val safetyColors = KinDoseThemeTokens.safetyColors
@@ -818,7 +1330,7 @@ internal fun SeniorApplianceHeroSurface(
                             modifier = Modifier.semantics { heading() }
                         )
                         Text(
-                            text = "${spec.medicationName} (${spec.strengthLabel}) is complete · Maya has been notified.",
+                            text = "${spec.medicationName} (${spec.strengthLabel}) is complete · Family Vault synced.",
                             style = MaterialTheme.typography.bodyLarge,
                             color = onContainerColor.copy(alpha = 0.88f),
                             textAlign = TextAlign.Center
@@ -827,20 +1339,50 @@ internal fun SeniorApplianceHeroSurface(
 
                     ExpressivePillBentoRow(spec = spec)
 
-                    if (!isDuplicateTapAlert) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        if (!isDuplicateTapAlert) {
+                            Surface(
+                                onClick = onConfirmTap,
+                                shape = CircleShape,
+                                color = Color.White.copy(alpha = 0.65f),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .heightIn(min = 52.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 12.dp)) {
+                                    Text(
+                                        text = "Test 2nd Tap Shield",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = FontWeight.Bold,
+                                        color = onContainerColor,
+                                        textAlign = TextAlign.Center
+                                    )
+                                }
+                            }
+                        }
+
                         Surface(
-                            onClick = onConfirmTap,
+                            onClick = onUndoConfirmTap,
                             shape = CircleShape,
-                            color = Color.White.copy(alpha = 0.65f),
+                            color = Color.White.copy(alpha = 0.85f),
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(min = 54.dp)
+                                .weight(1f)
+                                .heightIn(min = 52.dp)
+                                .semantics {
+                                    role = Role.Button
+                                    contentDescription = "Undo accidental confirmation and restore dose to due"
+                                }
                         ) {
-                            Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 16.dp)) {
+                            Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 12.dp)) {
                                 Text(
-                                    text = "Tap again to see how Double-Dose Shield protects you",
+                                    text = "Undo Accidental Tap",
                                     style = MaterialTheme.typography.labelLarge,
-                                    color = onContainerColor
+                                    fontWeight = FontWeight.Bold,
+                                    color = onContainerColor,
+                                    textAlign = TextAlign.Center
                                 )
                             }
                         }
@@ -1094,9 +1636,9 @@ private fun ExpressivePillBentoRow(spec: DoseScheduleSpec) {
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    SculpturalPillCanvas(pillShape = spec.pillShape, modifier = Modifier.size(48.dp))
+                    SculpturalPillCanvas(pillShape = spec.pillShape, modifier = Modifier.size(38.dp))
                     Surface(
                         color = MaterialTheme.colorScheme.surface,
                         shape = RoundedCornerShape(8.dp)
@@ -1108,7 +1650,7 @@ private fun ExpressivePillBentoRow(spec: DoseScheduleSpec) {
                             color = MaterialTheme.colorScheme.onSurface,
                             maxLines = 1,
                             softWrap = false,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
                         )
                     }
                 }
@@ -1268,6 +1810,17 @@ internal fun CaregiverCommandCenterSurface(
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         // 1. Live Escalation Card (When 8:30 AM Grace Period Expires)
         if (state is DoseState.Escalated) {
+            var customResolutionNote by remember {
+                mutableStateOf("Called ${snapshot.patientName.substringBefore(" ")} at 8:32 AM — confirmed she took ${activeRecord.spec.medicationName} with breakfast.")
+            }
+            val quickResolutionChips = remember(activeRecord.spec.medicationName) {
+                listOf(
+                    "Called on phone — took pill",
+                    "Given in person with water",
+                    "Held dose per MD instructions"
+                )
+            }
+
             Surface(
                 shape = RoundedCornerShape(32.dp),
                 color = safetyColors.escalationCrimsonContainer,
@@ -1277,7 +1830,7 @@ internal fun CaregiverCommandCenterSurface(
             ) {
                 Column(
                     modifier = Modifier.padding(22.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -1310,9 +1863,29 @@ internal fun CaregiverCommandCenterSurface(
                         color = safetyColors.onEscalationCrimsonContainer.copy(alpha = 0.85f)
                     )
 
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(quickResolutionChips) { chipNote ->
+                            FilterChip(
+                                selected = customResolutionNote == chipNote,
+                                onClick = { customResolutionNote = chipNote },
+                                shape = CircleShape,
+                                label = { Text(chipNote, style = MaterialTheme.typography.labelMedium) }
+                            )
+                        }
+                    }
+
+                    OutlinedTextField(
+                        value = customResolutionNote,
+                        onValueChange = { customResolutionNote = it },
+                        label = { Text("Clinical Resolution Audit Note (Required)") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
                     Button(
                         onClick = {
-                            onResolveTap("Called Mom at 8:32 AM — confirmed she took ${activeRecord.spec.medicationName} with breakfast.")
+                            onResolveTap(customResolutionNote)
                         },
                         colors = ButtonDefaults.buttonColors(
                             containerColor = safetyColors.escalationCrimson,
@@ -1623,7 +2196,9 @@ private fun FloatingScenarioPillBar(
 @Composable
 private fun AccountSignInModalSheetContent(
     snapshot: RepositorySnapshot,
+    pairingCodeValidationError: String? = null,
     onSignInWithProvider: (IdentityProvider, String, String) -> Unit,
+    onVerifySeniorPairingCode: (String, String) -> Unit = { _, _ -> },
     onSignOut: () -> Unit,
     onSimulateNewPhoneRestore: () -> Unit,
     onOpenAuditLedger: () -> Unit,
@@ -2003,6 +2578,7 @@ private data class QuickMedicationPreset(
  */
 @Composable
 private fun AddMedicationModalSheetContent(
+    validationError: String? = null,
     onSaveMedication: (
         medicationName: String,
         strengthLabel: String,
@@ -2015,12 +2591,13 @@ private fun AddMedicationModalSheetContent(
     ) -> Unit,
     onClose: () -> Unit
 ) {
+    val safetyColors = KinDoseThemeTokens.safetyColors
     val presets = remember {
         listOf(
             QuickMedicationPreset(
                 name = "Metformin",
                 strength = "500 mg",
-                timeLabel = "8:00 AM",
+                timeLabel = "9:00 AM",
                 purpose = "Blood Sugar & Metabolic Control",
                 foodWarning = "Take with breakfast to prevent stomach upset",
                 shape = PillShape.ROUND_TABLET,
@@ -2062,7 +2639,7 @@ private fun AddMedicationModalSheetContent(
 
     var medName by remember { mutableStateOf("Metformin") }
     var strength by remember { mutableStateOf("500 mg") }
-    var selectedTime by remember { mutableStateOf("8:00 AM") }
+    var selectedTime by remember { mutableStateOf("9:00 AM") }
     var purpose by remember { mutableStateOf("Blood Sugar & Metabolic Control") }
     var foodNote by remember { mutableStateOf("Take with breakfast to prevent stomach upset") }
     var selectedShape by remember { mutableStateOf(PillShape.ROUND_TABLET) }
@@ -2099,6 +2676,22 @@ private fun AddMedicationModalSheetContent(
             }
             TextButton(onClick = onClose) {
                 Text("Close")
+            }
+        }
+
+        if (!validationError.isNullOrBlank()) {
+            Surface(
+                color = safetyColors.escalationCrimsonContainer,
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = validationError,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = safetyColors.onEscalationCrimsonContainer,
+                    modifier = Modifier.padding(14.dp)
+                )
             }
         }
 
@@ -2637,6 +3230,7 @@ private fun ProviderSignInButton(
 @Composable
 private fun TransactionalOutboxAndAuditSheetContent(
     snapshot: RepositorySnapshot,
+    onFlushOutbox: () -> Unit = {},
     onClose: () -> Unit
 ) {
     Column(
@@ -2661,9 +3255,73 @@ private fun TransactionalOutboxAndAuditSheetContent(
             }
         }
 
+        Surface(
+            color = MaterialTheme.colorScheme.primaryContainer,
+            shape = RoundedCornerShape(20.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = "Principal Scaling & Durability Guarantees (L8 / IC8)",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+                Text(
+                    text = "• Partitioned by PatientId · Bounded Rings (Max 100 Audit / 100 Outbox / 128 FCM Keys)\n" +
+                        "• Zero Dual-Write: State + Outbox commit atomically in a single WAL transaction\n" +
+                        "• Zero-Trust Cache Sentinel: Clearing OS cache revokes active session nonce immediately",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.9f)
+                )
+                Button(
+                    onClick = onFlushOutbox,
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "Flush & Verify Transactional Outbox (${snapshot.outboxQueue.size} Events)",
+                        fontFamily = GoogleSansDisplayFamily,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+
+        if (snapshot.outboxQueue.isNotEmpty()) {
+            Text(
+                text = "TRANSACTIONAL OUTBOX QUEUE (${snapshot.outboxQueue.size})",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            snapshot.outboxQueue.forEach { item ->
+                Surface(
+                    color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.65f),
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text(
+                            text = "[${item.formattedTime}] ${item.outboxId} · ${item.deliveryStatus}",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontFamily = GoogleSansMonoFamily,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "${item.medicationName}: ${item.eventType.displayLabel}",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+            }
+        }
+
         Text(
-            text = "Every state transition commits atomically alongside its idempotency key and outbox payload.",
-            style = MaterialTheme.typography.bodyMedium,
+            text = "IMMUTABLE AUDIT LEDGER (${snapshot.auditLedger.size})",
+            style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 

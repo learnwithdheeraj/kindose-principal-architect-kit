@@ -162,4 +162,101 @@ class MainScreenViewModelTest {
         assertEquals("500 mg", snap.activeRecord.spec.strengthLabel)
         assertTrue(snap.activeRecord.state is DoseState.Due)
     }
+
+    @Test
+    fun zeroTrustColdStart_startsSignedOutWithNoPreselectedAccount() = runTest {
+        val repository = DefaultDataRepository(startSignedIn = false)
+        val viewModel = MainScreenViewModel(repository)
+        backgroundScope.launch(testDispatcher) { viewModel.uiState.collect() }
+
+        val snap = (viewModel.uiState.value as MainScreenUiState.Success).snapshot
+        assertEquals(false, snap.cloudVault.isSignedIn)
+        assertEquals("", snap.cloudVault.primaryEmail)
+        assertEquals("", snap.cloudVault.accountDisplayName)
+        assertTrue(snap.cloudVault.linkedProviders.isEmpty())
+    }
+
+    @Test
+    fun seniorPairingCode_rejectsInvalidShortCodeAndAcceptsValid6DigitCode() = runTest {
+        val repository = DefaultDataRepository(startSignedIn = false)
+        val viewModel = MainScreenViewModel(repository)
+        backgroundScope.launch(testDispatcher) { viewModel.uiState.collect() }
+
+        // Wrong path: 2 digits
+        viewModel.onVerifySeniorPairingCode("12", "Eleanor Vance")
+        val afterInvalid = viewModel.uiState.value as MainScreenUiState.Success
+        assertEquals(false, afterInvalid.snapshot.cloudVault.isSignedIn)
+        assertTrue(afterInvalid.controls.pairingCodeValidationError?.contains("6 digits") == true)
+
+        // Happy path: 6 digits ("849-204")
+        viewModel.onVerifySeniorPairingCode("849-204", "Eleanor Vance")
+        val afterValid = viewModel.uiState.value as MainScreenUiState.Success
+        assertEquals(true, afterValid.snapshot.cloudVault.isSignedIn)
+        assertEquals(IdentityProvider.SENIOR_QR_PAIRING, afterValid.snapshot.cloudVault.activeProvider)
+    }
+
+    @Test
+    fun addMedicationValidation_rejectsBlankNameAndDuplicateScheduleConflict() = runTest {
+        val repository = DefaultDataRepository()
+        val viewModel = MainScreenViewModel(repository)
+        backgroundScope.launch(testDispatcher) { viewModel.uiState.collect() }
+
+        // Wrong path 1: Blank medication name
+        viewModel.onAddNewMedication(
+            medicationName = " ",
+            strengthLabel = "10 mg",
+            scheduledTimeLabel = "9:00 AM",
+            clinicalPurpose = "Test",
+            foodWarning = "Water",
+            pillShape = PillShape.ROUND_TABLET,
+            pillColorLabel = "White",
+            imprintCode = "T1"
+        )
+        val afterBlank = viewModel.uiState.value as MainScreenUiState.Success
+        assertEquals(3, afterBlank.snapshot.windows.size)
+        assertTrue(afterBlank.controls.addMedicationValidationError?.contains("required") == true)
+
+        // Wrong path 2: Duplicate Lisinopril at 8:00 AM
+        viewModel.onAddNewMedication(
+            medicationName = "Lisinopril",
+            strengthLabel = "10 mg",
+            scheduledTimeLabel = "8:00 AM",
+            clinicalPurpose = "Blood Pressure",
+            foodWarning = "Water",
+            pillShape = PillShape.ROUND_TABLET,
+            pillColorLabel = "Pink",
+            imprintCode = "LUPIN 10"
+        )
+        val afterDuplicate = viewModel.uiState.value as MainScreenUiState.Success
+        assertEquals(3, afterDuplicate.snapshot.windows.size)
+        assertTrue(afterDuplicate.controls.addMedicationValidationError?.contains("already scheduled") == true)
+    }
+
+    @Test
+    fun seniorUndoAccidentalConfirm_revertsToDueAndEmitsOutboxEvent() = runTest {
+        val repository = DefaultDataRepository()
+        val viewModel = MainScreenViewModel(repository)
+        backgroundScope.launch(testDispatcher) { viewModel.uiState.collect() }
+
+        viewModel.onSeniorConfirmTap()
+        assertTrue((viewModel.uiState.value as MainScreenUiState.Success).snapshot.activeRecord.state is DoseState.Confirmed)
+
+        viewModel.onSeniorUndoConfirmTap()
+        val afterUndo = (viewModel.uiState.value as MainScreenUiState.Success).snapshot
+        assertTrue(afterUndo.activeRecord.state is DoseState.Due)
+        assertTrue(afterUndo.outboxQueue.any { it.eventType == OutboxEventType.DOSE_CONFIRMATION_UNDONE })
+    }
+
+    @Test
+    fun caregiverResolve_rejectsBlankResolutionNote() = runTest {
+        val repository = DefaultDataRepository()
+        val viewModel = MainScreenViewModel(repository)
+        backgroundScope.launch(testDispatcher) { viewModel.uiState.collect() }
+
+        viewModel.onSimulateEscalationBreach()
+        viewModel.onCaregiverResolveTap("   ")
+        val stateAfterBlank = (viewModel.uiState.value as MainScreenUiState.Success)
+        assertTrue(stateAfterBlank.snapshot.activeRecord.state is DoseState.Escalated)
+        assertTrue(stateAfterBlank.controls.isStatusBannerError)
+    }
 }

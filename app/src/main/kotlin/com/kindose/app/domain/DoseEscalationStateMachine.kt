@@ -19,7 +19,8 @@ enum class RejectionCode {
     SNOOZE_LIMIT_REACHED,
     PAST_ESCALATION_DEADLINE,
     INVALID_STATE_TRANSITION,
-    DEADLINE_NOT_REACHED_YET
+    DEADLINE_NOT_REACHED_YET,
+    EMPTY_RESOLUTION_NOTE
 }
 
 /**
@@ -40,6 +41,7 @@ object DoseEscalationStateMachine {
         is DoseCommand.OnGraceDeadlineExpired -> handleGraceExpired(spec, currentState, command)
         is DoseCommand.OnCaregiverResolve -> handleCaregiverResolve(spec, currentState, command)
         is DoseCommand.OnWindowClosed -> handleWindowClosed(spec, currentState, command)
+        is DoseCommand.OnSeniorUndoConfirm -> handleSeniorUndoConfirm(spec, currentState, command)
     }
 
     private fun handleWindowOpen(
@@ -303,37 +305,80 @@ object DoseEscalationStateMachine {
         spec: DoseScheduleSpec,
         state: DoseState,
         cmd: DoseCommand.OnCaregiverResolve
-    ): TransitionOutcome = when (state) {
-        is DoseState.Escalated,
-        is DoseState.Due,
-        is DoseState.Snoozed -> {
-            val newState = DoseState.ResolvedByCaregiver(
-                resolvedAt = cmd.occurredAt,
-                caregiverId = cmd.caregiverId,
-                caregiverName = cmd.caregiverName,
-                resolutionNote = cmd.resolutionNote,
-                idempotencyKey = cmd.idempotencyKey
+    ): TransitionOutcome {
+        val cleanNote = cmd.resolutionNote.trim()
+        if (cleanNote.isEmpty()) {
+            return TransitionOutcome.RejectedDomainRule(
+                state,
+                RejectionCode.EMPTY_RESOLUTION_NOTE,
+                "Caregiver resolution note is required for clinical auditability"
             )
+        }
+        return when (state) {
+            is DoseState.Escalated,
+            is DoseState.Due,
+            is DoseState.Snoozed -> {
+                val newState = DoseState.ResolvedByCaregiver(
+                    resolvedAt = cmd.occurredAt,
+                    caregiverId = cmd.caregiverId,
+                    caregiverName = cmd.caregiverName,
+                    resolutionNote = cleanNote,
+                    idempotencyKey = cmd.idempotencyKey
+                )
+                TransitionOutcome.Applied(
+                    previousState = state,
+                    newState = newState,
+                    sideEffects = listOf(
+                        DoseSideEffect.CancelPendingAlarms(spec.doseWindowId),
+                        DoseSideEffect.EnqueueTransactionalOutboxEvent(
+                            doseWindowId = spec.doseWindowId,
+                            idempotencyKey = cmd.idempotencyKey,
+                            eventType = OutboxEventType.CAREGIVER_MANUALLY_RESOLVED,
+                            occurredAt = cmd.occurredAt,
+                            summary = "${cmd.caregiverName} verified dose: \"$cleanNote\""
+                        )
+                    )
+                )
+            }
+            is DoseState.ResolvedByCaregiver -> TransitionOutcome.Applied(state, state, emptyList())
+            else -> TransitionOutcome.RejectedDomainRule(
+                state,
+                RejectionCode.INVALID_STATE_TRANSITION,
+                "Caregiver cannot resolve dose in state ${state.stateName}"
+            )
+        }
+    }
+
+    private fun handleSeniorUndoConfirm(
+        spec: DoseScheduleSpec,
+        state: DoseState,
+        cmd: DoseCommand.OnSeniorUndoConfirm
+    ): TransitionOutcome = when (state) {
+        is DoseState.Confirmed -> {
+            val revertedState = DoseState.Due(notifiedAt = cmd.occurredAt)
             TransitionOutcome.Applied(
                 previousState = state,
-                newState = newState,
+                newState = revertedState,
                 sideEffects = listOf(
-                    DoseSideEffect.CancelPendingAlarms(spec.doseWindowId),
+                    DoseSideEffect.ScheduleExactWakeupAlarm(
+                        doseWindowId = spec.doseWindowId,
+                        triggerAt = spec.escalationDeadline,
+                        reason = "REARMED_AFTER_ACCIDENTAL_TAP_UNDO"
+                    ),
                     DoseSideEffect.EnqueueTransactionalOutboxEvent(
                         doseWindowId = spec.doseWindowId,
                         idempotencyKey = cmd.idempotencyKey,
-                        eventType = OutboxEventType.CAREGIVER_MANUALLY_RESOLVED,
+                        eventType = OutboxEventType.DOSE_CONFIRMATION_UNDONE,
                         occurredAt = cmd.occurredAt,
-                        summary = "${cmd.caregiverName} verified dose by phone: \"${cmd.resolutionNote}\""
+                        summary = "Senior reverted confirmation for ${spec.medicationName} (${cmd.reason}) — Watchdog re-armed"
                     )
                 )
             )
         }
-        is DoseState.ResolvedByCaregiver -> TransitionOutcome.Applied(state, state, emptyList())
         else -> TransitionOutcome.RejectedDomainRule(
             state,
             RejectionCode.INVALID_STATE_TRANSITION,
-            "Caregiver cannot resolve dose in state ${state.stateName}"
+            "Cannot undo confirmation from state ${state.stateName}"
         )
     }
 
